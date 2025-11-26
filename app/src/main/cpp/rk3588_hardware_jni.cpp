@@ -23,7 +23,7 @@ extern "C" {
 // LED控制命令
 #define LED_SET_POWER _IOW('L', 1, int)
 #define LED_SET_BRIGHTNESS _IOW('L', 2, int)
-#define LED_GET_STATE _IOR('L', 4, struct led_state)
+#define LED_GET_STATE _IOR('L', 3, struct led_state)
 
 // LED状态结构体
 struct led_state {
@@ -211,13 +211,17 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
         const char* led_name = led_devices[i];
         char brightness_path[256];
         char trigger_path[256];
+        char max_brightness_path[256];
         
         snprintf(brightness_path, sizeof(brightness_path), "/sys/class/leds/%s/brightness", led_name);
         snprintf(trigger_path, sizeof(trigger_path), "/sys/class/leds/%s/trigger", led_name);
+        snprintf(max_brightness_path, sizeof(max_brightness_path), "/sys/class/leds/%s/max_brightness", led_name);
         
         int brightness_value = 0;
+        int max_brightness_value = 255; // 默认最大值
         bool current_device_found = false;
         const char* current_device_mode = "unknown";
+        bool current_power_on = false;
         
         // 检查LED设备是否存在
         FILE* brightness_file = fopen(brightness_path, "r");
@@ -226,6 +230,13 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
             if (fscanf(brightness_file, "%d", &brightness_value) == 1) {
                 current_device_found = true;
                 device_found = true;
+                
+                // 读取最大亮度值
+                FILE* max_brightness_file = fopen(max_brightness_path, "r");
+                if (max_brightness_file != NULL) {
+                    fscanf(max_brightness_file, "%d", &max_brightness_value);
+                    fclose(max_brightness_file);
+                }
                 
                 // 读取触发模式
                 FILE* trigger_file = fopen(trigger_path, "r");
@@ -258,18 +269,41 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
                     work_brightness = brightness_value;
                     work_found = true;
                     work_device_mode = current_device_mode;
+                    
+                    // 控制界面只关注work设备的状态
+                    // 改进的电源状态判断逻辑 - 只使用work设备的状态
+                    if (strcmp(current_device_mode, "heartbeat") == 0) {
+                        // 呼吸灯模式：只要启用了呼吸灯模式，就认为电源开启
+                        current_power_on = true;
+                    } else if (strcmp(current_device_mode, "mmc2") == 0) {
+                        // mmc2模式：只要设备存在且模式正确，就认为电源开启
+                        current_power_on = true;
+                    } else if (strcmp(current_device_mode, "timer") == 0) {
+                        // 闪烁模式：只要启用了闪烁模式，就认为电源开启
+                        current_power_on = true;
+                    } else if (strcmp(current_device_mode, "default-on") == 0) {
+                        // 常亮模式：如果亮度大于0，认为电源开启；如果亮度为0，认为电源关闭
+                        current_power_on = (brightness_value > 0);
+                    } else {
+                        // 其他模式（如none）：认为电源关闭
+                        current_power_on = false;
+                    }
+                    
+                    // 设置最终的电源状态（只使用work设备的状态）
+                    power_on = current_power_on;
+                    
                 } else { // mmc2::设备
                     mmc2_brightness = brightness_value;
                     mmc2_found = true;
                     mmc2_device_mode = current_device_mode;
+                    
+                    // mmc2设备信息仅用于硬件测试，不影响控制界面的状态判断
+                    // 控制界面始终只使用work设备的状态
                 }
                 
-                // 只要有一个设备亮度>0，就认为电源开启
-                if (brightness_value > 0) {
-                    power_on = true;
-                }
-                
-                LOGI("检测到LED设备 %s: 亮度=%d, 模式=%s", led_name, brightness_value, current_device_mode);
+                LOGI("检测到LED设备 %s: 亮度=%d/%d, 模式=%s, 电源状态=%s", 
+                     led_name, brightness_value, max_brightness_value, current_device_mode, 
+                     current_power_on ? "开启" : "关闭");
             }
             fclose(brightness_file);
         } else {
@@ -277,15 +311,15 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
         }
     }
     
-    // 根据设备优先级选择要使用的模式（优先使用work设备的模式）
+    // 控制界面只使用work设备的模式
     if (work_found) {
         device_mode = work_device_mode;
-    } else if (mmc2_found) {
-        device_mode = mmc2_device_mode;
+    } else {
+        device_mode = "unknown";
     }
     
-    // 使用work设备的亮度作为主要显示值（如果work设备存在）
-    int brightness_value = work_found ? work_brightness : (mmc2_found ? mmc2_brightness : 0);
+    // 控制界面只使用work设备的亮度值
+    int brightness_value = work_found ? work_brightness : 0;
     
     // 设置LEDState对象的字段值
     env->SetBooleanField(ledState, powerOnField, power_on);
@@ -793,6 +827,13 @@ Java_com_example_myapplication3_RK3588HardwareService_controlWorkLED(JNIEnv *env
             if (fprintf(trigger_file, "default-on") > 0) {
                 LOGI("成功设置work设备为default-on模式");
                 fclose(trigger_file);
+                
+                // 确保亮度不为0
+                FILE* brightness_file = fopen(brightness_path, "w");
+                if (brightness_file != NULL) {
+                    fprintf(brightness_file, "255");
+                    fclose(brightness_file);
+                }
                 return JNI_TRUE;
             }
         } else {

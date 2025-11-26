@@ -1,0 +1,34 @@
+版本标记：修复LED模式管理功能
+日期：2024年12月
+
+修复内容：
+1. LED关闭后UI显示异常问题
+   - 问题：LED关闭时UI会跳转到常亮模式，而不是保持用户最后选择的模式
+   - 解决方案：添加lastUserSelectedMode变量记录用户选择，LED关闭时UI显示最后选择的模式
+
+2. LED重新开启时模式恢复问题
+   - 问题：重新开启LED时总是恢复为常亮模式，而不是用户之前选择的模式
+   - 解决方案：修改controlWorkLED方法，开启LED时使用lastUserSelectedMode变量设置模式
+
+3. 外部模式变化同步问题
+   - 问题：通过ADB等外部方式改变LED模式时，应用无法正确记录和同步
+   - 解决方案：在模式检测逻辑中更新lastUserSelectedMode变量，确保外部变化也能被正确记录
+
+主要修改文件：
+- MainActivity.java：
+  - 添加lastUserSelectedMode变量（默认"default-on"）
+  - 修改updateUIFromHardwareState方法，在模式检测时更新lastUserSelectedMode
+  - 修改controlWorkLED方法，开启LED时使用lastUserSelectedMode
+  - 修改模式卡片点击监听器，记录用户选择
+
+功能特性：
+- 用户操作：点击模式卡片时记录选择
+- 外部变化：检测到硬件状态变化时记录选择
+- 关闭状态：LED关闭时UI显示最后选择的模式
+- 开启状态：重新开启时恢复最后选择的模式
+
+测试验证：
+- ✅ LED模式切换功能正常
+- ✅ UI显示与硬件状态同步
+- ✅ 外部模式变化正确记录
+- ✅ 关闭/开启模式恢复一致
