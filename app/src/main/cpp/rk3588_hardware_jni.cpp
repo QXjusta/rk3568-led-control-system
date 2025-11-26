@@ -795,7 +795,7 @@ Java_com_example_myapplication3_HardwareReader_readSystemInfo(JNIEnv *env, jobje
 
 /**
  * 控制work LED设备
- * 由于需要root权限，此方法提供替代方案和状态检查
+ * 改进版本：关闭LED时保持当前模式，只设置亮度为0
  */
 JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication3_RK3588HardwareService_controlWorkLED(JNIEnv *env, jobject thiz,
@@ -819,50 +819,29 @@ Java_com_example_myapplication3_RK3588HardwareService_controlWorkLED(JNIEnv *env
     }
     fclose(check_file);
     
-    // 尝试通过修改触发模式来控制
-    FILE* trigger_file = fopen(trigger_path, "w");
-    if (trigger_file != NULL) {
-        if (enable) {
-            // 尝试设置为default-on模式
-            if (fprintf(trigger_file, "default-on") > 0) {
-                LOGI("成功设置work设备为default-on模式");
-                fclose(trigger_file);
-                
-                // 确保亮度不为0
-                FILE* brightness_file = fopen(brightness_path, "w");
-                if (brightness_file != NULL) {
-                    fprintf(brightness_file, "255");
-                    fclose(brightness_file);
-                }
+    if (enable) {
+        // 开启LED时，使用Java层传入的模式
+        // 这里只负责开启，具体模式由Java层控制
+        FILE* brightness_file = fopen(brightness_path, "w");
+        if (brightness_file != NULL) {
+            if (fprintf(brightness_file, "255") > 0) {
+                LOGI("成功开启work设备，亮度设置为255");
+                fclose(brightness_file);
                 return JNI_TRUE;
             }
-        } else {
-            // 尝试设置为none模式（关闭）
-            if (fprintf(trigger_file, "none") > 0) {
-                LOGI("成功设置work设备为none模式");
-                fclose(trigger_file);
-                
-                // 同时设置亮度为0确保关闭
-                FILE* brightness_file = fopen(brightness_path, "w");
-                if (brightness_file != NULL) {
-                    fprintf(brightness_file, "0");
-                    fclose(brightness_file);
-                }
-                return JNI_TRUE;
-            }
-        }
-        fclose(trigger_file);
-    }
-    
-    // 如果触发模式控制失败，尝试直接控制亮度
-    FILE* brightness_file = fopen(brightness_path, "w");
-    if (brightness_file != NULL) {
-        if (fprintf(brightness_file, "%d", enable ? 255 : 0) > 0) {
-            LOGI("成功通过亮度控制work设备: %s", enable ? "开启" : "关闭");
             fclose(brightness_file);
-            return JNI_TRUE;
         }
-        fclose(brightness_file);
+    } else {
+        // 关闭LED时，保持当前模式，只设置亮度为0
+        FILE* brightness_file = fopen(brightness_path, "w");
+        if (brightness_file != NULL) {
+            if (fprintf(brightness_file, "0") > 0) {
+                LOGI("成功关闭work设备，亮度设置为0（保持当前模式）");
+                fclose(brightness_file);
+                return JNI_TRUE;
+            }
+            fclose(brightness_file);
+        }
     }
     
     // 如果控制失败，提供详细的错误信息和替代方案
@@ -929,11 +908,6 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
                                                                       jstring mode) {
     (void)thiz; // 标记未使用参数
     
-    const char* led_name = "work";
-    char trigger_path[256];
-    
-    snprintf(trigger_path, sizeof(trigger_path), "/sys/class/leds/%s/trigger", led_name);
-    
     // 将Java字符串转换为C字符串
     const char* mode_str = env->GetStringUTFChars(mode, NULL);
     if (mode_str == NULL) {
@@ -942,17 +916,6 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
     }
     
     LOGI("尝试设置work LED设备模式: %s", mode_str);
-    
-    // 首先检查设备是否存在
-    char brightness_path[256];
-    snprintf(brightness_path, sizeof(brightness_path), "/sys/class/leds/%s/brightness", led_name);
-    FILE* check_file = fopen(brightness_path, "r");
-    if (check_file == NULL) {
-        LOGI("work设备不存在或无法访问");
-        env->ReleaseStringUTFChars(mode, mode_str);
-        return JNI_FALSE;
-    }
-    fclose(check_file);
     
     // 根据模式字符串设置对应的触发模式
     const char* trigger_mode = "none"; // 默认模式
@@ -969,31 +932,23 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
     
     LOGI("设置work设备触发模式为: %s", trigger_mode);
     
-    // 尝试设置触发模式
-    FILE* trigger_file = fopen(trigger_path, "w");
-    if (trigger_file != NULL) {
-        if (fprintf(trigger_file, "%s", trigger_mode) > 0) {
-            LOGI("成功设置work设备模式为: %s", trigger_mode);
-            fclose(trigger_file);
-            
-            // 如果设置为常亮模式，确保亮度不为0
-            if (strcmp(trigger_mode, "default-on") == 0) {
-                FILE* brightness_file = fopen(brightness_path, "w");
-                if (brightness_file != NULL) {
-                    fprintf(brightness_file, "255");
-                    fclose(brightness_file);
-                }
-            }
-            
-            env->ReleaseStringUTFChars(mode, mode_str);
-            return JNI_TRUE;
-        }
-        fclose(trigger_file);
+    // 使用shell命令设置LED模式（避免权限问题）
+    char command[512];
+    snprintf(command, sizeof(command), "echo '%s' > /sys/class/leds/work/trigger", trigger_mode);
+    
+    int result = system(command);
+    if (result == 0) {
+        LOGI("成功设置work设备模式为: %s", trigger_mode);
+        
+        // 不再自动设置亮度，让系统保持当前亮度状态
+        // 这样可以避免应用启动时强制改变LED状态
+        
+        env->ReleaseStringUTFChars(mode, mode_str);
+        return JNI_TRUE;
     }
     
-    // 如果控制失败，提供详细的错误信息和替代方案
-    LOGI("设置work设备模式失败，需要root权限");
-    LOGI("替代方案: 1. 使用root权限运行应用 2. 通过系统命令控制");
+    // 如果控制失败，提供详细的错误信息
+    LOGI("设置work设备模式失败，命令执行返回码: %d", result);
     
     env->ReleaseStringUTFChars(mode, mode_str);
     return JNI_FALSE;

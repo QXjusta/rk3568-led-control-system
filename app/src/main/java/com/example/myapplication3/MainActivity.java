@@ -4,6 +4,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.SharedPreferences;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
@@ -61,6 +62,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean shouldMonitorState = false;
     private Thread stateMonitorThread;
     private static final long STATE_MONITOR_INTERVAL = 1000; // 1秒检测一次，更快响应
+    // 应用启动时间记录
+    private long appStartTime = 0;
     // 用户控制状态标记（已弃用，硬件状态检测不再干扰用户操作）
     // private boolean isUserControlling = false;
     // private long lastUserControlTime = 0;
@@ -100,6 +103,10 @@ public class MainActivity extends AppCompatActivity {
             
             // 初始化硬件连接
             initializeHardwareConnection();
+            
+            // 应用启动时读取系统当前LED状态，而不是强制设置
+            addLogEntry("应用启动：读取系统当前Work灯状态");
+            
             addLogEntry("硬件服务绑定成功");
         }
         
@@ -115,6 +122,16 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        // 应用启动时读取保存的用户选择模式
+        SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
+        String savedMode = prefs.getString("lastUserSelectedMode", "default-on");
+        lastUserSelectedMode = savedMode;
+        addLogEntry("应用启动：读取保存的用户选择模式: " + savedMode);
+
+        // 记录应用启动时间
+        appStartTime = System.currentTimeMillis();
+        addLogEntry("应用启动时间记录: " + appStartTime);
 
         MaterialToolbar toolbar = findViewById(R.id.topAppBar);
         toolbar.setTitle(R.string.app_name);
@@ -176,6 +193,9 @@ public class MainActivity extends AppCompatActivity {
         // 检测硬件能力并设置模拟模式
         setupHardwareSimulationMode();
         
+        // 应用启动时立即同步硬件状态，确保界面与硬件状态一致
+        syncHardwareState();
+        
         addLogEntry("应用已就绪，Work灯控制功能可用");
     }
 
@@ -190,9 +210,7 @@ public class MainActivity extends AppCompatActivity {
         workLedStatusDot.setBackground(drawable);
     }
 
-    // 硬件只支持开关功能，颜色选择已移除
 
-    // 硬件只支持开关功能，动态模式相关方法已移除
 
     private void addLogEntry(String message) {
         String timestamp = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
@@ -477,8 +495,14 @@ public class MainActivity extends AppCompatActivity {
                 // 重要：只有当硬件状态确实发生变化且与UI状态不一致时才更新UI
                 // 避免用户手动操作被硬件状态检测覆盖
                 
+                // 应用启动时只读取系统状态，不进行任何ADB模式切换检测
+                // 这样可以确保应用启动时不会改变LED的当前状态
+                boolean isADBModeChange = false;
+                Log.d("StateDebug", "应用启动阶段：只读取系统状态，不进行ADB模式切换检测");
+                
                 // 只有当硬件状态确实发生变化且与UI状态不一致时才更新UI
-                if (state.powerOn != currentUIState) {
+                // 如果是ADB模式切换，不强制更新开关状态
+                if (state.powerOn != currentUIState && !isADBModeChange) {
                     // 先更新开关状态，但暂时移除监听器避免触发硬件控制
                     workLedSwitch.setOnCheckedChangeListener(null);
                     workLedSwitch.setChecked(state.powerOn);
@@ -560,32 +584,38 @@ public class MainActivity extends AppCompatActivity {
     
     /**
      * 控制Work灯
+     * 改进版本：关闭LED时保持当前模式，只设置亮度为0
      */
     private void controlWorkLED(boolean enable) {
         if (hardwareService != null) {
             if (enable) {
-                // 开启LED时，使用用户最后选择的模式
+                // 开启LED时，先设置模式再设置亮度
                 Log.d("WorkLEDControl", "开启Work灯，使用用户最后选择的模式: " + lastUserSelectedMode);
-                boolean success = hardwareService.setWorkLEDMode(lastUserSelectedMode);
-                if (success) {
+                boolean modeSuccess = hardwareService.setWorkLEDMode(lastUserSelectedMode);
+                if (modeSuccess) {
                     // 设置亮度为当前亮度值
                     int currentBrightness = brightnessSeekBar.getProgress();
-                    hardwareService.setWorkLEDBrightness(currentBrightness);
+                    boolean brightnessSuccess = hardwareService.setWorkLEDBrightness(currentBrightness);
                     
-                    addLogEntry("Work灯开启成功，模式: " + getModeDisplayName(lastUserSelectedMode));
-                    updateWorkLedStatus(true);
-                    Log.d("WorkLEDControl", "Work灯开启成功，模式: " + lastUserSelectedMode);
+                    if (brightnessSuccess) {
+                        addLogEntry("Work灯开启成功，模式: " + getModeDisplayName(lastUserSelectedMode));
+                        updateWorkLedStatus(true);
+                        Log.d("WorkLEDControl", "Work灯开启成功，模式: " + lastUserSelectedMode);
+                    } else {
+                        addLogEntry("Work灯亮度设置失败，但模式已设置");
+                        Log.w("WorkLEDControl", "Work灯亮度设置失败，但模式已设置");
+                    }
                 } else {
-                    addLogEntry("Work灯开启失败，可能需要root权限");
-                    Log.w("WorkLEDControl", "Work灯开启失败，可能需要root权限");
+                    addLogEntry("Work灯模式设置失败，可能需要root权限");
+                    Log.w("WorkLEDControl", "Work灯模式设置失败，可能需要root权限");
                 }
             } else {
-                // 关闭LED时，使用none模式
+                // 关闭LED时，保持当前模式，只设置亮度为0
                 boolean success = hardwareService.controlWorkLED(false);
                 if (success) {
-                    addLogEntry("Work灯关闭成功");
+                    addLogEntry("Work灯关闭成功（保持当前模式）");
                     updateWorkLedStatus(false);
-                    Log.d("WorkLEDControl", "Work灯关闭成功");
+                    Log.d("WorkLEDControl", "Work灯关闭成功（保持当前模式）");
                 } else {
                     addLogEntry("Work灯关闭失败，可能需要root权限");
                     Log.w("WorkLEDControl", "Work灯关闭失败，可能需要root权限");
@@ -623,8 +653,14 @@ public class MainActivity extends AppCompatActivity {
         if (hardwareService != null) {
             boolean success = hardwareService.setWorkLEDMode(mode);
             if (success) {
+                // 保存用户选择的模式到SharedPreferences
+                SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putString("lastUserSelectedMode", mode);
+                editor.apply();
+                
                 addLogEntry(String.format(getString(R.string.log_mode_set), getModeDisplayName(mode)));
-                Log.d("WorkLEDControl", "Work灯模式设置成功: " + mode);
+                Log.d("WorkLEDControl", "Work灯模式设置成功并保存: " + mode);
             } else {
                 addLogEntry("Work灯模式控制失败，可能需要root权限");
                 Log.w("WorkLEDControl", "Work灯模式控制失败，可能需要root权限");
@@ -679,6 +715,38 @@ public class MainActivity extends AppCompatActivity {
             
             icon.setColorFilter(getColor(R.color.card_text));
             text.setTextColor(getColor(R.color.card_text));
+        }
+    }
+    
+    /**
+     * 根据保存的模式设置初始选中状态
+     */
+    private void updateModeCardSelectionBasedOnSavedMode() {
+        // 读取保存的模式
+        SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
+        String savedMode = prefs.getString("lastUserSelectedMode", "default-on");
+        
+        // 根据保存的模式设置对应的卡片为选中状态
+        switch (savedMode) {
+            case "heartbeat":
+                updateModeCardSelection(modeDefaultOnCard, false);
+                updateModeCardSelection(modeHeartbeatCard, true);
+                updateModeCardSelection(modeTimerCard, false);
+                addLogEntry("应用启动：UI初始化为呼吸灯模式");
+                break;
+            case "timer":
+                updateModeCardSelection(modeDefaultOnCard, false);
+                updateModeCardSelection(modeHeartbeatCard, false);
+                updateModeCardSelection(modeTimerCard, true);
+                addLogEntry("应用启动：UI初始化为闪烁模式");
+                break;
+            case "default-on":
+            default:
+                updateModeCardSelection(modeDefaultOnCard, true);
+                updateModeCardSelection(modeHeartbeatCard, false);
+                updateModeCardSelection(modeTimerCard, false);
+                addLogEntry("应用启动：UI初始化为常亮模式");
+                break;
         }
     }
     
@@ -748,15 +816,33 @@ public class MainActivity extends AppCompatActivity {
         });
         
         // 模式控制监听器 - 卡片按钮样式
-        // 设置默认选中状态
-        updateModeCardSelection(modeDefaultOnCard, true);
+        // 根据保存的模式设置初始选中状态
+        updateModeCardSelectionBasedOnSavedMode();
         
         modeDefaultOnCard.setOnClickListener(v -> {
             updateModeCardSelection(modeDefaultOnCard, true);
             updateModeCardSelection(modeHeartbeatCard, false);
             updateModeCardSelection(modeTimerCard, false);
             lastUserSelectedMode = "default-on";
-            controlWorkLEDMode("default-on");
+            
+            // 保存用户选择的模式到SharedPreferences
+            SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString("lastUserSelectedMode", "default-on");
+            editor.apply();
+            
+            // 模式切换时保持原有的LED开关状态
+            boolean currentSwitchState = workLedSwitch.isChecked();
+            Log.d("ModeSwitch", "切换到常亮模式，保持开关状态: " + currentSwitchState);
+            
+            if (currentSwitchState) {
+                // 如果LED当前是开启状态，则应用新模式
+                controlWorkLEDMode("default-on");
+            } else {
+                // 如果LED当前是关闭状态，只记录模式选择，不实际控制硬件
+                addLogEntry("选择常亮模式（LED当前关闭，保持关闭状态）");
+                Log.d("ModeSwitch", "LED当前关闭，只记录模式选择，不控制硬件");
+            }
         });
         
         modeHeartbeatCard.setOnClickListener(v -> {
@@ -764,7 +850,25 @@ public class MainActivity extends AppCompatActivity {
             updateModeCardSelection(modeHeartbeatCard, true);
             updateModeCardSelection(modeTimerCard, false);
             lastUserSelectedMode = "heartbeat";
-            controlWorkLEDMode("heartbeat");
+            
+            // 保存用户选择的模式到SharedPreferences
+            SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString("lastUserSelectedMode", "heartbeat");
+            editor.apply();
+            
+            // 模式切换时保持原有的LED开关状态
+            boolean currentSwitchState = workLedSwitch.isChecked();
+            Log.d("ModeSwitch", "切换到呼吸灯模式，保持开关状态: " + currentSwitchState);
+            
+            if (currentSwitchState) {
+                // 如果LED当前是开启状态，则应用新模式
+                controlWorkLEDMode("heartbeat");
+            } else {
+                // 如果LED当前是关闭状态，只记录模式选择，不实际控制硬件
+                addLogEntry("选择呼吸灯模式（LED当前关闭，保持关闭状态）");
+                Log.d("ModeSwitch", "LED当前关闭，只记录模式选择，不控制硬件");
+            }
         });
         
         modeTimerCard.setOnClickListener(v -> {
@@ -772,12 +876,30 @@ public class MainActivity extends AppCompatActivity {
             updateModeCardSelection(modeHeartbeatCard, false);
             updateModeCardSelection(modeTimerCard, true);
             lastUserSelectedMode = "timer";
-            controlWorkLEDMode("timer");
+            
+            // 保存用户选择的模式到SharedPreferences
+            SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString("lastUserSelectedMode", "timer");
+            editor.apply();
+            
+            // 模式切换时保持原有的LED开关状态
+            boolean currentSwitchState = workLedSwitch.isChecked();
+            Log.d("ModeSwitch", "切换到闪烁模式，保持开关状态: " + currentSwitchState);
+            
+            if (currentSwitchState) {
+                // 如果LED当前是开启状态，则应用新模式
+                controlWorkLEDMode("timer");
+            } else {
+                // 如果LED当前是关闭状态，只记录模式选择，不实际控制硬件
+                addLogEntry("选择闪烁模式（LED当前关闭，保持关闭状态）");
+                Log.d("ModeSwitch", "LED当前关闭，只记录模式选择，不控制硬件");
+            }
         });
     }
     
     /**
-     * 设置LED文件权限并初始化LED状态 - 解决重启后权限丢失问题
+     * 设置LED文件权限 - 只设置权限，不改变LED状态
      */
     private void setLedFilePermissions() {
         new Thread(() -> {
@@ -791,10 +913,8 @@ public class MainActivity extends AppCompatActivity {
                 // 设置WORK LED触发模式文件权限
                 os.writeBytes("chmod 666 /sys/class/leds/work/trigger\n");
                 
-                // 设置WORK LED为常亮模式（default-on）
-                os.writeBytes("echo default-on > /sys/class/leds/work/trigger\n");
-                // 设置WORK LED亮度为255（最大亮度）
-                os.writeBytes("echo 255 > /sys/class/leds/work/brightness\n");
+                // 重要：不再强制设置LED为常亮模式，保持LED当前状态
+                Log.d("LEDPermissions", "只设置LED文件权限，不改变LED当前状态");
                 
                 // 退出su shell
                 os.writeBytes("exit\n");
@@ -803,13 +923,13 @@ public class MainActivity extends AppCompatActivity {
                 int result = process.waitFor();
                 
                 if (result == 0) {
-                    Log.d("LEDPermissions", "LED文件权限设置成功，WORK灯已设为常亮模式");
-                    addLogEntry("LED文件权限设置成功，WORK灯已设为常亮模式");
+                    Log.d("LEDPermissions", "LED文件权限设置成功，保持LED当前状态");
+                    addLogEntry("LED文件权限设置成功，保持LED当前状态");
                 } else {
                     Log.w("LEDPermissions", "LED文件权限设置失败，可能需要root权限");
                     addLogEntry("LED文件权限设置失败，可能需要root权限");
                     
-                    // 尝试非root方式设置权限和LED状态
+                    // 尝试非root方式设置权限
                     tryNonRootPermissionSetting();
                 }
                 
@@ -817,14 +937,14 @@ public class MainActivity extends AppCompatActivity {
                 Log.e("LEDPermissions", "LED文件权限设置异常: " + e.getMessage());
                 addLogEntry("LED文件权限设置异常: " + e.getMessage());
                 
-                // 尝试非root方式设置权限和LED状态
+                // 尝试非root方式设置权限
                 tryNonRootPermissionSetting();
             }
         }).start();
     }
     
     /**
-     * 尝试非root方式设置权限和LED状态
+     * 尝试非root方式设置权限
      */
     private void tryNonRootPermissionSetting() {
         try {
@@ -837,27 +957,10 @@ public class MainActivity extends AppCompatActivity {
             
             if (result1 == 0 && result2 == 0) {
                 Log.d("LEDPermissions", "非root方式LED文件权限设置成功");
-                addLogEntry("非root方式LED文件权限设置成功");
+                addLogEntry("非root方式LED文件权限设置成功，保持LED当前状态");
                 
-                // 尝试设置WORK LED为常亮模式
-                try {
-                    process = Runtime.getRuntime().exec("echo default-on > /sys/class/leds/work/trigger");
-                    int result3 = process.waitFor();
-                    
-                    process = Runtime.getRuntime().exec("echo 255 > /sys/class/leds/work/brightness");
-                    int result4 = process.waitFor();
-                    
-                    if (result3 == 0 && result4 == 0) {
-                        Log.d("LEDPermissions", "非root方式WORK灯常亮模式设置成功");
-                        addLogEntry("WORK灯已设为常亮模式");
-                    } else {
-                        Log.w("LEDPermissions", "非root方式WORK灯模式设置失败");
-                        addLogEntry("WORK灯模式设置失败，可能需要手动设置");
-                    }
-                } catch (Exception e) {
-                    Log.e("LEDPermissions", "非root方式LED状态设置异常: " + e.getMessage());
-                    addLogEntry("WORK灯状态设置异常");
-                }
+                // 重要：不再强制设置LED为常亮模式，保持LED当前状态
+                Log.d("LEDPermissions", "非root方式只设置权限，不改变LED当前状态");
             } else {
                 Log.w("LEDPermissions", "非root方式LED文件权限设置失败");
                 addLogEntry("非root方式LED文件权限设置失败，应用启动后可能需要手动设置权限");
