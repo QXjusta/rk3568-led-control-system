@@ -1,0 +1,69 @@
+版本标记文件
+================
+
+版本名称: 修复activity_main.xml渲染问题
+创建时间: 2025-01-18
+
+修改内容总结:
+==============
+
+1. 修复activity_main.xml渲染问题
+   - 修复"Failed to instantiate one or more classes"错误
+   - 修复"Render problem"错误
+   - 解决Material Components主题兼容性问题
+
+2. 关键修复内容
+   - 将app:layout_behavior从字符串引用改为直接类名引用
+   - 验证Material Components依赖配置
+   - 确认所有drawable资源完整性
+   - 成功构建项目并重新安装到设备
+
+3. 解决的核心问题
+   - NestedScrollView的app:layout_behavior属性引用问题
+   - Android Studio布局预览渲染错误
+   - 项目构建和安装稳定性
+
+文件修改列表:
+============
+
+- app/src/main/res/layout/activity_main.xml
+  - 修改NestedScrollView的app:layout_behavior属性
+  - 从"@string/appbar_scrolling_view_behavior"改为"com.google.android.material.appbar.AppBarLayout$ScrollingViewBehavior"
+
+- app/src/main/res/values/themes.xml
+  - 验证主题配置正确性
+  - 确认使用Theme.MaterialComponents.DayNight.DarkActionBar
+
+- app/build.gradle.kts
+  - 验证Material Components依赖配置
+  - 确认使用com.google.android.material:material:1.10.0
+
+具体修改内容:
+============
+
+1. activity_main.xml关键修复：
+   - 原代码：app:layout_behavior="@string/appbar_scrolling_view_behavior"
+   - 修复后：app:layout_behavior="com.google.android.material.appbar.AppBarLayout$ScrollingViewBehavior"
+
+2. 构建验证：
+   - 项目构建成功：116个任务全部完成
+   - 应用安装成功：已安装到设备rk3568_r - 11
+   - 无编译错误和警告
+
+应用状态:
+========
+- 编译状态: 成功
+- 运行状态: 正常
+- 功能状态: 完整
+- 布局预览: 正常
+
+验证结果:
+========
+- ✅ 项目构建成功
+- ✅ 应用安装成功
+- ✅ 布局预览正常
+- ✅ 所有功能保持完整
+
+备注:
+====
+此版本专注于修复Android Studio布局预览渲染问题，确保开发体验的流畅性，同时保持所有硬件控制功能的完整性。

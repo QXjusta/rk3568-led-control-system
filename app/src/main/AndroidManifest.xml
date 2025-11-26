@@ -18,9 +18,10 @@
         tools:ignore="ScopedStorage" />
     
     <!-- 系统级权限 - 允许应用以系统权限运行 -->
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
-    <uses-permission android:name="android.permission.ACCESS_HARDWARE_CONTROL" />
+    <!-- 注释掉系统级权限，普通应用无法使用 -->
+    <!-- <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" /> -->
+    <!-- <uses-permission android:name="android.permission.WRITE_SETTINGS" /> -->
+    <!-- <uses-permission android:name="android.permission.ACCESS_HARDWARE_CONTROL" /> -->
     
     <!-- 共享用户ID - 让应用以系统应用身份运行 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
