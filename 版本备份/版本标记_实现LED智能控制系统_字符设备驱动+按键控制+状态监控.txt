@@ -1,0 +1,29 @@
+版本标记：实现LED智能控制系统
+
+日期：2025-11-27
+
+主要功能：
+1. 创建了LED字符设备驱动（zhangsan_led.c），使用组长名字命名设备节点
+2. 实现了按键输入驱动，支持物理按键控制LED，带防抖处理
+3. 创建设备树配置文件，支持GPIO动态配置
+4. 优化了Android应用的状态监控机制，1秒检测一次状态
+5. 修改了JNI层代码，优先使用字符设备节点，失败回退到sysfs方式
+6. 确保APP能够实时读取LED实际状态，包括物理按键改变的状态
+
+修改的文件：
+- app/src/main/cpp/rk3588_hardware_jni.cpp：优化LED控制方法，支持字符设备节点
+- app/src/main/java/com/example/myapplication3/RK3588HardwareService.java：添加设备节点配置
+- driver/zhangsan_led.c：LED字符设备驱动
+- driver/Makefile：驱动编译脚本
+- driver/led-button-overlay.dts：设备树覆盖文件
+
+使用说明：
+1. 编译驱动：cd driver && make
+2. 安装驱动：insmod zhangsan_led.ko
+3. 启动应用：在设备上运行LED控制APP
+4. 测试功能：使用APP控制LED，或通过物理按键控制，观察APP界面同步更新
+
+注意事项：
+- 驱动需要在RK3588开发板上编译和运行
+- 设备树覆盖文件需要根据实际硬件连接修改GPIO引脚
+- 应用需要root权限才能访问字符设备节点

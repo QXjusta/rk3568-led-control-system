@@ -66,6 +66,8 @@ public class MainActivity extends AppCompatActivity {
     private String lastUserSelectedMode = "default-on";
     // 记录关闭前的亮度值，用于重新开启时恢复
     private int lastBrightnessBeforeTurnOff = 255;
+    // 应用启动标志，用于避免启动时误判LED状态变化
+    private boolean isAppStarting = true;
     
     /**
      * 硬件服务连接回调
@@ -105,7 +107,11 @@ public class MainActivity extends AppCompatActivity {
             
             // 应用启动时读取系统当前LED状态，而不是强制设置
             Log.d("AppStart", "应用启动：读取系统当前Work灯状态");
-        Log.d("AppStart", "硬件服务绑定成功");
+            // 硬件服务绑定成功，立即同步硬件状态到UI
+            syncHardwareState();
+            // 应用启动完成
+            isAppStarting = false;
+            Log.d("AppStart", "硬件服务绑定成功，应用启动完成");
         }
         
         @Override
@@ -475,6 +481,33 @@ public class MainActivity extends AppCompatActivity {
                       ", workBrightness=" + state.workBrightness + 
                       ", mode=" + state.mode + 
                       ", UI状态: " + currentUIState);
+                
+                // 检测LED是否从关闭状态变为开启状态
+                boolean isTurningOn = !currentUIState && state.powerOn;
+                
+                // 只有在应用不是刚启动且LED确实从关闭变为开启时，才重新应用用户最后选择的模式
+                if (isTurningOn && !isAppStarting) {
+                    Log.d("StateMonitor", "检测到LED从关闭变为开启，重新应用用户选择的模式: " + lastUserSelectedMode);
+                    // 应用用户最后选择的模式
+                    controlWorkLEDMode(lastUserSelectedMode);
+                    
+                    // 根据模式设置亮度
+                    if (lastUserSelectedMode.equals("heartbeat") || lastUserSelectedMode.equals("timer")) {
+                        // 呼吸灯/闪烁模式：锁定亮度为255
+                        controlWorkLEDBrightness(255);
+                        Log.d("StateMonitor", "开启呼吸灯/闪烁模式，亮度锁定为255");
+                    } else {
+                        // 常亮模式：使用关闭前记录的亮度值，如果为0则设置为最小亮度1避免误关闭
+                        int brightnessToUse = lastBrightnessBeforeTurnOff;
+                        if (brightnessToUse == 0) {
+                            brightnessToUse = 1; // 设置为最小亮度避免误关闭
+                        }
+                        brightnessSeekBar.setProgress(brightnessToUse);
+                        brightnessValueText.setText(String.format(getString(R.string.brightness_value_format), brightnessToUse));
+                        controlWorkLEDBrightness(brightnessToUse);
+                        Log.d("StateMonitor", "开启常亮模式，使用关闭前记录的亮度: " + brightnessToUse);
+                    }
+                }
                 
                 // 简化模式检测逻辑：只在LED开启时检测模式
                 if (state.mode != null && state.powerOn) {
