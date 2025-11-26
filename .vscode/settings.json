@@ -1,4 +1,5 @@
 {
-    "java.configuration.updateBuildConfiguration": "automatic",
-    "C_Cpp.errorSquiggles": "disabled"
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "C_Cpp.errorSquiggles": "disabled",
+  "java.gradle.buildServer.enabled": "on"
 }
