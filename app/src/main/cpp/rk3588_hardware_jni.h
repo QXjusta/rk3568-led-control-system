@@ -24,6 +24,10 @@ JNIEXPORT jboolean JNICALL Java_com_example_myapplication3_RK3588HardwareService
 JNIEXPORT jboolean JNICALL Java_com_example_myapplication3_RK3588HardwareService_setDevicePermissions(JNIEnv *, jobject, jstring, jint);
 JNIEXPORT jboolean JNICALL Java_com_example_myapplication3_RK3588HardwareService_checkRootPermission(JNIEnv *, jobject);
 
+// 新增的JNI函数
+JNIEXPORT jstring JNICALL Java_com_example_myapplication3_RK3588HardwareService_readLEDState(JNIEnv *, jobject);
+JNIEXPORT jstring JNICALL Java_com_example_myapplication3_RK3588HardwareService_readSystemInfo(JNIEnv *, jobject);
+
 // 串口通信相关JNI函数
 JNIEXPORT jboolean JNICALL Java_com_example_myapplication3_SerialPortManager_nativeOpen(JNIEnv *, jobject, jstring, jint);
 JNIEXPORT void JNICALL Java_com_example_myapplication3_SerialPortManager_nativeClose(JNIEnv *, jobject);

@@ -12,7 +12,6 @@ add_library(
         rk3588_hardware
         SHARED
         rk3588_hardware_jni.cpp
-        device_permissions.cpp
 )
 
 # 链接库

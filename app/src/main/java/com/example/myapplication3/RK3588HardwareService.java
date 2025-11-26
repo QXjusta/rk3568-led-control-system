@@ -54,8 +54,12 @@ public class RK3588HardwareService extends Service {
     private int currentMode = MODE_SERIAL;
     
     // 通信组件
-    private SerialPortManager serialPortManager;
     private ExecutorService executorService;
+    
+    // 串口相关状态变量
+    private InputStream inputStream;
+    private OutputStream outputStream;
+    private boolean isSerialOpen = false;
     
     // 回调接口
     private HardwareCallback hardwareCallback;
@@ -105,8 +109,7 @@ public class RK3588HardwareService extends Service {
             // 初始化线程池
             executorService = Executors.newSingleThreadExecutor();
             
-            // 初始化串口管理器
-            serialPortManager = new SerialPortManager();
+            // 串口相关状态变量已在成员变量中初始化
             
             // 初始化状态标志
             isRunning.set(true);
@@ -155,9 +158,7 @@ public class RK3588HardwareService extends Service {
         
         // 简单直接的资源清理
         try {
-            if (serialPortManager != null) {
-                serialPortManager.close();
-            }
+            serialClose();
         } catch (Exception e) {
             Log.e(TAG, "关闭串口异常: " + e.getMessage());
         }
@@ -216,26 +217,198 @@ public class RK3588HardwareService extends Service {
     }
     
     /**
+     * 串口打开
+     */
+    public boolean serialOpen(String port, int baudRate) {
+        try {
+            // 调用JNI方法打开串口
+            if (nativeOpen(port, baudRate)) {
+                isSerialOpen = true;
+                
+                // 初始化模拟的输入输出流（在实际应用中应该通过JNI获取真实的流）
+                // 这里创建虚拟的流对象来避免NullPointerException
+                if (inputStream == null) {
+                    inputStream = new java.io.ByteArrayInputStream(new byte[0]);
+                }
+                if (outputStream == null) {
+                    outputStream = new java.io.ByteArrayOutputStream();
+                }
+                
+                Log.d(TAG, "串口已打开: " + port + " @ " + baudRate + " baud");
+                return true;
+            } else {
+                Log.e(TAG, "JNI打开串口失败: " + port);
+                return false;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "打开串口失败: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * 串口关闭
+     */
+    public void serialClose() {
+        try {
+            // 先标记为关闭状态
+            isSerialOpen = false;
+            
+            // 调用JNI关闭串口
+            nativeClose();
+            
+            // 使用单独的线程来关闭流，避免阻塞
+            Thread closeThread = new Thread(() -> {
+                try {
+                    if (inputStream != null) {
+                        inputStream.close();
+                        inputStream = null;
+                    }
+                    if (outputStream != null) {
+                        outputStream.close();
+                        outputStream = null;
+                    }
+                    Log.d(TAG, "串口已关闭");
+                } catch (IOException e) {
+                    Log.e(TAG, "关闭串口异常: " + e.getMessage());
+                }
+            });
+            
+            closeThread.start();
+            
+            // 等待关闭线程完成，但最多等待2秒
+            closeThread.join(2000);
+            
+            // 如果线程仍然存活，中断它
+            if (closeThread.isAlive()) {
+                closeThread.interrupt();
+                Log.w(TAG, "串口关闭超时，已强制中断");
+            }
+            
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.e(TAG, "串口关闭被中断: " + e.getMessage());
+        } catch (Exception e) {
+            Log.e(TAG, "关闭串口异常: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 串口读取数据（非阻塞方式）
+     */
+    public byte[] serialReadData() {
+        if (!isSerialOpen || inputStream == null) {
+            return null;
+        }
+        
+        try {
+            // 检查是否有可用数据，避免阻塞
+            if (inputStream.available() > 0) {
+                byte[] buffer = new byte[1024];
+                int bytesRead = inputStream.read(buffer);
+                if (bytesRead > 0) {
+                    byte[] data = new byte[bytesRead];
+                    System.arraycopy(buffer, 0, data, 0, bytesRead);
+                    return data;
+                }
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "读取串口数据失败: " + e.getMessage());
+        }
+        return null;
+    }
+    
+    /**
+     * 串口写入数据
+     */
+    public boolean serialWriteData(byte[] data) {
+        if (!isSerialOpen || data == null) {
+            return false;
+        }
+        
+        try {
+            // 调用JNI写入数据
+            int bytesWritten = nativeWrite(data, data.length);
+            if (bytesWritten > 0) {
+                return true;
+            } else {
+                Log.e(TAG, "JNI写入串口数据失败");
+                return false;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "写入串口数据失败: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * 检查串口是否打开
+     */
+    public boolean isSerialOpen() {
+        return isSerialOpen;
+    }
+    
+    /**
      * 串口连接
      */
     public void connectSerial(String port, int baudRate) {
         try {
-            if (serialPortManager == null) {
-                serialPortManager = new SerialPortManager();
-            }
+            boolean serialConnected = serialOpen(port, baudRate);
             
-            if (serialPortManager.open(port, baudRate)) {
+            // 检查LED设备是否可访问，即使串口连接失败，只要LED可访问就标记为已连接
+            boolean ledAccessible = isLEDAccessible();
+            
+            // 只要串口连接成功或LED设备可访问，就标记为已连接
+            if (serialConnected || ledAccessible) {
                 isConnected.set(true);
                 notifyConnectionStatus(true);
-                Log.d(TAG, "串口连接成功: " + port + " @ " + baudRate + " baud");
                 
-                // 开始监听数据
-                startDataListening();
+                if (serialConnected) {
+                    Log.d(TAG, "串口连接成功: " + port + " @ " + baudRate + " baud");
+                    // 开始监听数据
+                    startDataListening();
+                } else {
+                    Log.d(TAG, "串口连接失败，但LED设备可访问: " + port);
+                }
             } else {
-                throw new RuntimeException("串口打开失败");
+                Log.e(TAG, "串口打开失败且LED设备不可访问: " + port + " @ " + baudRate + " baud");
+                isConnected.set(false);
+                notifyConnectionStatus(false);
+                notifyError("串口打开失败且LED设备不可访问: " + port);
             }
         } catch (Exception e) {
-            throw new RuntimeException("串口连接失败", e);
+            Log.e(TAG, "串口连接失败: " + e.getMessage());
+            
+            // 即使发生异常，也要检查LED设备是否可访问
+            try {
+                if (isLEDAccessible()) {
+                    isConnected.set(true);
+                    notifyConnectionStatus(true);
+                    Log.d(TAG, "串口连接异常，但LED设备可访问");
+                } else {
+                    isConnected.set(false);
+                    notifyConnectionStatus(false);
+                    notifyError("串口连接失败: " + e.getMessage());
+                }
+            } catch (Exception ex) {
+                isConnected.set(false);
+                notifyConnectionStatus(false);
+                notifyError("串口连接失败: " + e.getMessage());
+            }
+        }
+    }
+    
+    /**
+     * 检查LED设备是否可访问
+     */
+    private boolean isLEDAccessible() {
+        try {
+            // 尝试读取LED状态，检查设备是否可访问
+            String ledState = readLEDState();
+            return ledState != null;
+        } catch (Exception e) {
+            Log.w(TAG, "检查LED设备可访问性失败: " + e.getMessage());
+            return false;
         }
     }
     
@@ -256,10 +429,8 @@ public class RK3588HardwareService extends Service {
         
         // 简单直接的资源清理
         try {
-            if (serialPortManager != null) {
-                serialPortManager.close();
-                Log.d(TAG, "串口连接已断开");
-            }
+            serialClose();
+            Log.d(TAG, "串口连接已断开");
         } catch (Exception e) {
             Log.e(TAG, "断开串口异常: " + e.getMessage());
         }
@@ -280,7 +451,7 @@ public class RK3588HardwareService extends Service {
             while (retryCount < maxRetries && !Thread.currentThread().isInterrupted()) {
                 try {
                     // 尝试重新连接
-                    if (isConnected.get() && serialPortManager != null && !serialPortManager.isOpen()) {
+                    if (isConnected.get() && !isSerialOpen()) {
                         Log.i(TAG, "尝试重新连接串口 (第" + (retryCount + 1) + "次)");
                         // 这里需要保存之前的连接参数，实际应用中应该存储这些参数
                         String savedPort = "/dev/ttyS1"; // 示例端口
@@ -353,9 +524,9 @@ public class RK3588HardwareService extends Service {
      */
     public boolean sendControlCommand(String command) {
         try {
-            if (isConnected.get() && serialPortManager != null) {
+            if (isConnected.get() && isSerialOpen()) {
                 byte[] data = command.getBytes("UTF-8");
-                boolean result = serialPortManager.writeData(data);
+                boolean result = serialWriteData(data);
                 if (result) {
                     Log.d(TAG, "串口命令发送成功: " + command);
                     return true;
@@ -382,6 +553,13 @@ public class RK3588HardwareService extends Service {
     }
     
     /**
+     * 获取当前LED状态（用于状态监控）
+     */
+    public LEDState getCurrentLEDState() {
+        return getLEDState();
+    }
+    
+    /**
      * 启动状态监控
      */
     private void startStateMonitoring() {
@@ -404,6 +582,8 @@ public class RK3588HardwareService extends Service {
         
         shouldMonitorState = true;
         stateMonitorThread = new Thread(() -> {
+            LEDState lastLEDState = null;
+            
             while (shouldMonitorState) {
                 try {
                     // 只有在硬件连接成功后才开始监控GPIO状态
@@ -417,11 +597,35 @@ public class RK3588HardwareService extends Service {
                             }
                         }
                         
+                        // 监控LED状态变化
+                        LEDState currentLEDState = getCurrentLEDState();
+                        if (lastLEDState != null && currentLEDState != null) {
+                            // 检测LED状态变化
+                            boolean modeChanged = !currentLEDState.mode.equals(lastLEDState.mode);
+                            boolean brightnessChanged = currentLEDState.workBrightness != lastLEDState.workBrightness;
+                            
+                            if (modeChanged || brightnessChanged) {
+                                // 检测到LED状态变化，直接同步状态
+                                Log.d(TAG, "检测到LED状态变化: 模式=" + currentLEDState.mode + ", 亮度=" + currentLEDState.workBrightness);
+                                notifyHardwareStateChanged(currentLEDState);
+                            }
+                        }
+                        
+                        lastLEDState = currentLEDState;
+                        
                         // 检查连接状态
-                        if (serialPortManager != null && !serialPortManager.isOpen()) {
+                        // 修改：即使串口未打开，只要LED设备可访问，就保持连接状态
+                        if (!isSerialOpen() && !isLEDAccessible()) {
                             isConnected.set(false);
                             if (stateListener != null) {
-                                stateListener.onConnectionLost("串口连接已断开");
+                                stateListener.onConnectionLost("串口连接已断开且LED设备不可访问");
+                            }
+                        } else if (!isSerialOpen() && isLEDAccessible()) {
+                            // 如果串口未打开但LED设备可访问，确保连接状态为true
+                            if (!isConnected.get()) {
+                                isConnected.set(true);
+                                notifyConnectionStatus(true);
+                                Log.d(TAG, "保持连接状态：串口未打开但LED设备可访问");
                             }
                         }
                         
@@ -506,10 +710,8 @@ public class RK3588HardwareService extends Service {
         
         // 简单直接的资源清理
         try {
-            if (serialPortManager != null) {
-                serialPortManager.close();
-                Log.d(TAG, "串口连接已关闭");
-            }
+            serialClose();
+            Log.d(TAG, "串口连接已关闭");
         } catch (Exception e) {
             Log.e(TAG, "关闭串口异常: " + e.getMessage());
         }
@@ -556,9 +758,9 @@ public class RK3588HardwareService extends Service {
         try {
             switch (currentMode) {
                 case MODE_SERIAL:
-                    if (serialPortManager != null && serialPortManager.isOpen()) {
+                    if (isSerialOpen()) {
                         // 检查是否有可用数据，避免阻塞
-                        return serialPortManager.readData();
+                        return serialReadData();
                     }
                     return null;
 
@@ -578,9 +780,8 @@ public class RK3588HardwareService extends Service {
         try {
             switch (currentMode) {
                 case MODE_SERIAL:
-                    if (serialPortManager != null) {
-                        byte[] buffer = new byte[1024];
-                        byte[] data = serialPortManager.readData();
+                    if (isSerialOpen()) {
+                        byte[] data = serialReadData();
                         if (data != null && data.length > 0) {
                             return data;
                         }
@@ -610,10 +811,9 @@ public class RK3588HardwareService extends Service {
                 boolean success = false;
                 switch (currentMode) {
                     case MODE_SERIAL:
-                        if (serialPortManager != null) {
+                        if (isSerialOpen()) {
                             byte[] dataBytes = data.getBytes();
-                            serialPortManager.writeData(dataBytes);
-                            success = true;
+                            success = serialWriteData(dataBytes);
                         }
                         break;
 
@@ -687,7 +887,17 @@ public class RK3588HardwareService extends Service {
     public native boolean checkRootPermission();
     public native boolean controlWorkLED(boolean enable);
     public native boolean setWorkLEDBrightness(int brightness);
-    public native boolean setWorkLEDMode(String mode);
+    public native boolean setWorkLEDMode(String mode, boolean applyHardware);
+    public native String readLEDState();
+    public native String readSystemInfo();
+    
+    // 串口相关的native方法
+    public native boolean nativeOpen(String devicePath, int baudRate);
+    public native void nativeClose();
+    public native int nativeRead(byte[] buffer, int size);
+    public native int nativeWrite(byte[] data, int size);
+    public native boolean nativeIsOpen();
+    public native boolean nativeSetParameters(int baudRate, int dataBits, int stopBits, int parity);
     
     // 通知方法
     private void notifyConnectionStatus(boolean connected) {

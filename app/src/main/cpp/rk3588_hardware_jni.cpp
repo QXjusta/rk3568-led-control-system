@@ -4,8 +4,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <cstring>
+#include "rk3588_hardware_jni.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -271,22 +273,17 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
                     work_device_mode = current_device_mode;
                     
                     // 控制界面只关注work设备的状态
-                    // 改进的电源状态判断逻辑 - 只使用work设备的状态
-                    if (strcmp(current_device_mode, "heartbeat") == 0) {
-                        // 呼吸灯模式：只要启用了呼吸灯模式，就认为电源开启
+                    // 修复电源状态判断逻辑：对于动态模式（heartbeat/timer），即使亮度为0也认为电源开启
+                    if (strcmp(current_device_mode, "heartbeat") == 0 || 
+                        strcmp(current_device_mode, "timer") == 0) {
+                        // 呼吸灯和闪烁模式：LED在亮灭之间切换，亮度值可能为0，但状态应为开启
                         current_power_on = true;
                     } else if (strcmp(current_device_mode, "mmc2") == 0) {
-                        // mmc2模式：只要设备存在且模式正确，就认为电源开启
+                        // mmc2模式：硬件控制模式，状态应为开启
                         current_power_on = true;
-                    } else if (strcmp(current_device_mode, "timer") == 0) {
-                        // 闪烁模式：只要启用了闪烁模式，就认为电源开启
-                        current_power_on = true;
-                    } else if (strcmp(current_device_mode, "default-on") == 0) {
-                        // 常亮模式：如果亮度大于0，认为电源开启；如果亮度为0，认为电源关闭
-                        current_power_on = (brightness_value > 0);
                     } else {
-                        // 其他模式（如none）：认为电源关闭
-                        current_power_on = false;
+                        // 其他模式（default-on等）：基于亮度值判断
+                        current_power_on = (brightness_value > 0);
                     }
                     
                     // 设置最终的电源状态（只使用work设备的状态）
@@ -428,17 +425,98 @@ Java_com_example_myapplication3_RK3588HardwareService_checkDeviceNode(JNIEnv *en
     return JNI_FALSE;
 }
 
-// 声明在device_permissions.cpp中定义的函数
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication3_RK3588HardwareService_checkDevicePermissions(JNIEnv *env, jobject thiz,
-                                                                              jstring device_path);
+                                                                              jstring device_path) {
+    (void)thiz; // 标记未使用参数
+    
+    const char *path = env->GetStringUTFChars(device_path, nullptr);
+    if (path == nullptr) {
+        return JNI_FALSE;
+    }
+    
+    // 检查文件是否存在
+    if (access(path, F_OK) != 0) {
+        LOGE("设备节点不存在: %s", path);
+        env->ReleaseStringUTFChars(device_path, path);
+        return JNI_FALSE;
+    }
+    
+    // 检查读权限
+    if (access(path, R_OK) != 0) {
+        LOGE("设备节点无读权限: %s", path);
+        env->ReleaseStringUTFChars(device_path, path);
+        return JNI_FALSE;
+    }
+    
+    // 检查写权限
+    if (access(path, W_OK) != 0) {
+        LOGE("设备节点无写权限: %s", path);
+        env->ReleaseStringUTFChars(device_path, path);
+        return JNI_FALSE;
+    }
+    
+    // 获取文件状态
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        LOGI("设备节点权限: %o, 用户: %d, 组: %d", st.st_mode & 0777, st.st_uid, st.st_gid);
+    }
+    
+    LOGI("设备节点权限检查通过: %s", path);
+    env->ReleaseStringUTFChars(device_path, path);
+    return JNI_TRUE;
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication3_RK3588HardwareService_setDevicePermissions(JNIEnv *env, jobject thiz,
-                                                                            jstring device_path, jint mode);
+                                                                            jstring device_path, jint mode) {
+    (void)thiz; // 标记未使用参数
+    
+    const char *path = env->GetStringUTFChars(device_path, nullptr);
+    if (path == nullptr) {
+        return JNI_FALSE;
+    }
+    
+    // 使用chmod设置权限
+    if (chmod(path, mode) == 0) {
+        LOGI("设备节点权限设置成功: %s -> %o", path, mode);
+        env->ReleaseStringUTFChars(device_path, path);
+        return JNI_TRUE;
+    } else {
+        LOGE("设备节点权限设置失败: %s, 错误: %s", path, strerror(errno));
+        env->ReleaseStringUTFChars(device_path, path);
+        return JNI_FALSE;
+    }
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication3_RK3588HardwareService_checkRootPermission(JNIEnv *env, jobject thiz);
+Java_com_example_myapplication3_RK3588HardwareService_checkRootPermission(JNIEnv *env, jobject thiz) {
+    (void)env;  // 标记未使用参数
+    (void)thiz; // 标记未使用参数
+    
+    // 尝试访问需要root权限的系统文件
+    if (access("/system/bin/su", F_OK) == 0) {
+        LOGI("检测到root权限可用");
+        return JNI_TRUE;
+    }
+    
+    // 尝试执行需要root权限的命令
+    FILE *pipe = popen("id", "r");
+    if (pipe) {
+        char buffer[128];
+        if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            if (strstr(buffer, "uid=0") != nullptr) {
+                LOGI("当前具有root权限");
+                pclose(pipe);
+                return JNI_TRUE;
+            }
+        }
+        pclose(pipe);
+    }
+    
+    LOGE("无root权限");
+    return JNI_FALSE;
+}
 
 /**
  * 检查设备权限
@@ -453,7 +531,7 @@ Java_com_example_myapplication3_RK3588HardwareService_checkRootPermission(JNIEnv
  * 打开串口
  */
 JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication3_SerialPortManager_nativeOpen(JNIEnv *env, jobject thiz,
+Java_com_example_myapplication3_RK3588HardwareService_nativeOpen(JNIEnv *env, jobject thiz,
                                                             jstring port, jint baud_rate) {
     (void)thiz; // 标记未使用参数
     
@@ -527,7 +605,7 @@ Java_com_example_myapplication3_SerialPortManager_nativeOpen(JNIEnv *env, jobjec
  * 关闭串口
  */
 JNIEXPORT void JNICALL
-Java_com_example_myapplication3_SerialPortManager_nativeClose(JNIEnv *env, jobject thiz) {
+Java_com_example_myapplication3_RK3588HardwareService_nativeClose(JNIEnv *env, jobject thiz) {
     (void)env;  // 标记未使用参数
     (void)thiz; // 标记未使用参数
     
@@ -542,7 +620,7 @@ Java_com_example_myapplication3_SerialPortManager_nativeClose(JNIEnv *env, jobje
  * 读取串口数据
  */
 JNIEXPORT jint JNICALL
-Java_com_example_myapplication3_SerialPortManager_nativeRead(JNIEnv *env, jobject thiz,
+Java_com_example_myapplication3_RK3588HardwareService_nativeRead(JNIEnv *env, jobject thiz,
                                                            jbyteArray buffer, jint size) {
     (void)thiz; // 标记未使用参数
     
@@ -575,8 +653,8 @@ Java_com_example_myapplication3_SerialPortManager_nativeRead(JNIEnv *env, jobjec
  * 写入串口数据
  */
 JNIEXPORT jint JNICALL
-Java_com_example_myapplication3_SerialPortManager_nativeWrite(JNIEnv *env, jobject thiz,
-                                                             jbyteArray data, jint size) {
+Java_com_example_myapplication3_RK3588HardwareService_nativeWrite(JNIEnv *env, jobject thiz,
+                                                            jbyteArray data, jint size) {
     (void)thiz; // 标记未使用参数
     
     if (serial_fd < 0) {
@@ -606,7 +684,7 @@ Java_com_example_myapplication3_SerialPortManager_nativeWrite(JNIEnv *env, jobje
  * 检查串口是否打开
  */
 JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication3_SerialPortManager_nativeIsOpen(JNIEnv *env, jobject thiz) {
+Java_com_example_myapplication3_RK3588HardwareService_nativeIsOpen(JNIEnv *env, jobject thiz) {
     (void)env;  // 标记未使用参数
     (void)thiz; // 标记未使用参数
     
@@ -617,7 +695,7 @@ Java_com_example_myapplication3_SerialPortManager_nativeIsOpen(JNIEnv *env, jobj
  * 设置串口参数
  */
 JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication3_SerialPortManager_nativeSetParameters(JNIEnv *env, jobject thiz,
+Java_com_example_myapplication3_RK3588HardwareService_nativeSetParameters(JNIEnv *env, jobject thiz,
                                                                      jint baud_rate, jint data_bits,
                                                                      jint stop_bits, jint parity) {
     (void)env;  // 标记未使用参数
@@ -693,159 +771,38 @@ Java_com_example_myapplication3_SerialPortManager_nativeSetParameters(JNIEnv *en
     return JNI_TRUE;
 }
 
-// ========== HardwareReader JNI实现 ==========
 
-/**
- * 读取LED状态
- */
-JNIEXPORT jstring JNICALL
-Java_com_example_myapplication3_HardwareReader_readLEDState(JNIEnv *env, jobject thiz) {
-    (void)thiz; // 标记未使用参数
-    
-    // 检查LED设备状态
-    char buffer[256];
-    
-    // 直接读取work LED的状态（设备上实际存在的LED）
-    FILE* fp = fopen("/sys/class/leds/work/brightness", "r");
-    if (fp != nullptr) {
-        int brightness;
-        if (fscanf(fp, "%d", &brightness) == 1) {
-            // 检查LED的触发模式
-            FILE* trigger_fp = fopen("/sys/class/leds/work/trigger", "r");
-            if (trigger_fp != nullptr) {
-                char trigger_content[512];
-                if (fgets(trigger_content, sizeof(trigger_content), trigger_fp) != nullptr) {
-                    // 检查是否处于特殊模式（如heartbeat、timer等）
-                    if (strstr(trigger_content, "[heartbeat]") != nullptr) {
-                        snprintf(buffer, sizeof(buffer), "LED状态(work): 心跳模式闪烁中 (亮度值=%d)", brightness);
-                    } else if (strstr(trigger_content, "[timer]") != nullptr) {
-                        snprintf(buffer, sizeof(buffer), "LED状态(work): 定时器模式闪烁中 (亮度值=%d)", brightness);
-                    } else if (strstr(trigger_content, "[default-on]") != nullptr) {
-                        snprintf(buffer, sizeof(buffer), "LED状态(work): 默认开启 (亮度值=%d)", brightness);
-                    } else {
-                        snprintf(buffer, sizeof(buffer), "LED状态(work): 亮度=%d", brightness);
-                    }
-                } else {
-                    snprintf(buffer, sizeof(buffer), "LED状态(work): 亮度=%d", brightness);
-                }
-                fclose(trigger_fp);
-            } else {
-                snprintf(buffer, sizeof(buffer), "LED状态(work): 亮度=%d", brightness);
-            }
-            fclose(fp);
-            return env->NewStringUTF(buffer);
-        }
-        fclose(fp);
-    }
-    
-    // 如果无法读取，返回错误信息
-    snprintf(buffer, sizeof(buffer), "LED状态: 无法读取work LED设备");
-    return env->NewStringUTF(buffer);
-}
-
-/**
- * 检查设备权限
- */
-JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication3_HardwareReader_checkDevicePermissions(JNIEnv *env, jobject thiz, jstring devicePath) {
-    (void)thiz; // 标记未使用参数
-    
-    const char* path = env->GetStringUTFChars(devicePath, nullptr);
-    if (path == nullptr) {
-        return JNI_FALSE;
-    }
-    
-    // 检查文件是否存在且有读取权限
-    if (access(path, R_OK) == 0) {
-        LOGI("设备权限检查通过: %s", path);
-        env->ReleaseStringUTFChars(devicePath, path);
-        return JNI_TRUE;
-    }
-    
-    LOGI("设备权限检查失败: %s", path);
-    env->ReleaseStringUTFChars(devicePath, path);
-    return JNI_FALSE;
-}
-
-/**
- * 读取系统信息
- */
-JNIEXPORT jstring JNICALL
-Java_com_example_myapplication3_HardwareReader_readSystemInfo(JNIEnv *env, jobject thiz) {
-    (void)thiz; // 标记未使用参数
-    
-    char buffer[1024];
-    
-    // 读取系统信息
-    FILE* fp = fopen("/proc/version", "r");
-    if (fp != nullptr) {
-        char version[256];
-        if (fgets(version, sizeof(version), fp) != nullptr) {
-            snprintf(buffer, sizeof(buffer), "系统信息: %s", version);
-            fclose(fp);
-            return env->NewStringUTF(buffer);
-        }
-        fclose(fp);
-    }
-    
-    // 返回错误信息
-    snprintf(buffer, sizeof(buffer), "系统信息: 无法读取系统版本信息");
-    return env->NewStringUTF(buffer);
-}
 
 /**
  * 控制work LED设备
- * 改进版本：关闭LED时保持当前模式，只设置亮度为0
+ * 改进版本：使用系统命令确保权限，正确处理模式切换
  */
 JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication3_RK3588HardwareService_controlWorkLED(JNIEnv *env, jobject thiz,
                                                                       jboolean enable) {
     (void)thiz; // 标记未使用参数
     
-    const char* led_name = "work";
-    char trigger_path[256];
-    char brightness_path[256];
-    
-    snprintf(trigger_path, sizeof(trigger_path), "/sys/class/leds/%s/trigger", led_name);
-    snprintf(brightness_path, sizeof(brightness_path), "/sys/class/leds/%s/brightness", led_name);
-    
     LOGI("尝试控制work LED设备: %s", enable ? "开启" : "关闭");
     
-    // 首先检查设备是否存在
-    FILE* check_file = fopen(brightness_path, "r");
-    if (check_file == NULL) {
-        LOGI("work设备不存在或无法访问");
-        return JNI_FALSE;
-    }
-    fclose(check_file);
+    // 使用系统命令控制LED，确保权限正确
+    char command[512];
     
     if (enable) {
-        // 开启LED时，使用Java层传入的模式
-        // 这里只负责开启，具体模式由Java层控制
-        FILE* brightness_file = fopen(brightness_path, "w");
-        if (brightness_file != NULL) {
-            if (fprintf(brightness_file, "255") > 0) {
-                LOGI("成功开启work设备，亮度设置为255");
-                fclose(brightness_file);
-                return JNI_TRUE;
-            }
-            fclose(brightness_file);
-        }
+        // 开启LED：先设置模式为常亮，然后设置亮度为255
+        snprintf(command, sizeof(command), "echo 'default-on' > /sys/class/leds/work/trigger && echo 255 > /sys/class/leds/work/brightness");
     } else {
-        // 关闭LED时，保持当前模式，只设置亮度为0
-        FILE* brightness_file = fopen(brightness_path, "w");
-        if (brightness_file != NULL) {
-            if (fprintf(brightness_file, "0") > 0) {
-                LOGI("成功关闭work设备，亮度设置为0（保持当前模式）");
-                fclose(brightness_file);
-                return JNI_TRUE;
-            }
-            fclose(brightness_file);
-        }
+        // 关闭LED：只设置亮度为0，保持当前模式
+        snprintf(command, sizeof(command), "echo 0 > /sys/class/leds/work/brightness");
+    }
+    
+    int result = system(command);
+    if (result == 0) {
+        LOGI("成功控制work设备: %s", enable ? "开启" : "关闭");
+        return JNI_TRUE;
     }
     
     // 如果控制失败，提供详细的错误信息和替代方案
-    LOGI("控制work设备失败，需要root权限");
+    LOGI("控制work设备失败，命令执行返回码: %d", result);
     LOGI("替代方案: 1. 使用root权限运行应用 2. 通过系统命令控制");
     
     return JNI_FALSE;
@@ -904,8 +861,7 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDBrightness(JNIEn
  * 支持常亮、呼吸灯、闪烁等模式
  */
 JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env, jobject thiz,
-                                                                      jstring mode) {
+Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env, jobject thiz, jstring mode, jboolean apply_hardware) {
     (void)thiz; // 标记未使用参数
     
     // 将Java字符串转换为C字符串
@@ -915,7 +871,16 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
         return JNI_FALSE;
     }
     
-    LOGI("尝试设置work LED设备模式: %s", mode_str);
+    LOGI("尝试设置work LED设备模式: %s, 应用硬件操作: %s", mode_str, apply_hardware ? "是" : "否");
+    
+    // 首先读取当前的亮度值，以便在模式切换后恢复
+    int current_brightness = 0;
+    FILE* brightness_file = fopen("/sys/class/leds/work/brightness", "r");
+    if (brightness_file != NULL) {
+        fscanf(brightness_file, "%d", &current_brightness);
+        fclose(brightness_file);
+        LOGI("当前亮度值: %d", current_brightness);
+    }
     
     // 根据模式字符串设置对应的触发模式
     const char* trigger_mode = "none"; // 默认模式
@@ -932,6 +897,13 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
     
     LOGI("设置work设备触发模式为: %s", trigger_mode);
     
+    // 如果不需要应用硬件操作，直接返回成功
+    if (!apply_hardware) {
+        LOGI("跳过硬件操作，仅记录模式变更");
+        env->ReleaseStringUTFChars(mode, mode_str);
+        return JNI_TRUE;
+    }
+    
     // 使用shell命令设置LED模式（避免权限问题）
     char command[512];
     snprintf(command, sizeof(command), "echo '%s' > /sys/class/leds/work/trigger", trigger_mode);
@@ -940,8 +912,28 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
     if (result == 0) {
         LOGI("成功设置work设备模式为: %s", trigger_mode);
         
-        // 不再自动设置亮度，让系统保持当前亮度状态
-        // 这样可以避免应用启动时强制改变LED状态
+        // 修复：只有当apply_hardware为false时才保持原有亮度状态
+        // 当用户主动开启LED时，应该设置亮度为255，而不是保持关闭状态
+        if (!apply_hardware && current_brightness == 0) {
+            LOGI("非硬件操作模式，保持LED关闭状态");
+            snprintf(command, sizeof(command), "echo 0 > /sys/class/leds/work/brightness");
+            int brightness_result = system(command);
+            if (brightness_result == 0) {
+                LOGI("成功保持LED关闭状态");
+            } else {
+                LOGI("保持LED关闭状态失败，命令执行返回码: %d", brightness_result);
+            }
+        } else if (apply_hardware) {
+            // 硬件操作模式：用户主动控制，设置亮度为255开启LED
+            LOGI("硬件操作模式，设置LED亮度为255");
+            snprintf(command, sizeof(command), "echo 255 > /sys/class/leds/work/brightness");
+            int brightness_result = system(command);
+            if (brightness_result == 0) {
+                LOGI("成功开启LED");
+            } else {
+                LOGI("开启LED失败，命令执行返回码: %d", brightness_result);
+            }
+        }
         
         env->ReleaseStringUTFChars(mode, mode_str);
         return JNI_TRUE;
@@ -952,6 +944,52 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
     
     env->ReleaseStringUTFChars(mode, mode_str);
     return JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_example_myapplication3_RK3588HardwareService_readLEDState(JNIEnv *env, jobject thiz) {
+    (void)thiz; // 标记未使用参数
+    
+    // 读取LED状态
+    char led_state[256];
+    FILE* led_file = fopen("/sys/class/leds/work/brightness", "r");
+    if (led_file != NULL) {
+        int brightness;
+        if (fscanf(led_file, "%d", &brightness) == 1) {
+            snprintf(led_state, sizeof(led_state), "LED亮度: %d", brightness);
+        } else {
+            snprintf(led_state, sizeof(led_state), "无法读取LED亮度");
+        }
+        fclose(led_file);
+    } else {
+        snprintf(led_state, sizeof(led_state), "LED设备不可访问");
+    }
+    
+    return env->NewStringUTF(led_state);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_example_myapplication3_RK3588HardwareService_readSystemInfo(JNIEnv *env, jobject thiz) {
+    (void)thiz; // 标记未使用参数
+    
+    // 读取系统信息
+    char system_info[512];
+    
+    // 读取内核版本
+    FILE* version_file = fopen("/proc/version", "r");
+    if (version_file != NULL) {
+        char version[256];
+        if (fgets(version, sizeof(version), version_file) != NULL) {
+            snprintf(system_info, sizeof(system_info), "内核版本: %s", version);
+        } else {
+            snprintf(system_info, sizeof(system_info), "无法读取内核版本");
+        }
+        fclose(version_file);
+    } else {
+        snprintf(system_info, sizeof(system_info), "系统信息不可访问");
+    }
+    
+    return env->NewStringUTF(system_info);
 }
 
 // ========== JNI注册函数 ==========
@@ -972,21 +1010,16 @@ static JNINativeMethod nativeMethods[] = {
     {"checkRootPermission", "()Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_checkRootPermission},
     {"controlWorkLED", "(Z)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_controlWorkLED},
     {"setWorkLEDBrightness", "(I)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDBrightness},
-    {"setWorkLEDMode", "(Ljava/lang/String;)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode},
-    
-    // HardwareReader方法
-    {"readLEDState", "()Ljava/lang/String;", (void*)Java_com_example_myapplication3_HardwareReader_readLEDState},
-    {"checkDevicePermissions", "(Ljava/lang/String;)Z", (void*)Java_com_example_myapplication3_HardwareReader_checkDevicePermissions},
-    {"readSystemInfo", "()Ljava/lang/String;", (void*)Java_com_example_myapplication3_HardwareReader_readSystemInfo}
-};
-
-static JNINativeMethod serialMethods[] = {
-    {"nativeOpen", "(Ljava/lang/String;I)Z", (void*)Java_com_example_myapplication3_SerialPortManager_nativeOpen},
-    {"nativeClose", "()V", (void*)Java_com_example_myapplication3_SerialPortManager_nativeClose},
-    {"nativeRead", "([BI)I", (void*)Java_com_example_myapplication3_SerialPortManager_nativeRead},
-    {"nativeWrite", "([BI)I", (void*)Java_com_example_myapplication3_SerialPortManager_nativeWrite},
-    {"nativeIsOpen", "()Z", (void*)Java_com_example_myapplication3_SerialPortManager_nativeIsOpen},
-    {"nativeSetParameters", "(IIII)Z", (void*)Java_com_example_myapplication3_SerialPortManager_nativeSetParameters}
+    {"setWorkLEDMode", "(Ljava/lang/String;Z)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode},
+    {"readLEDState", "()Ljava/lang/String;", (void*)Java_com_example_myapplication3_RK3588HardwareService_readLEDState},
+    {"readSystemInfo", "()Ljava/lang/String;", (void*)Java_com_example_myapplication3_RK3588HardwareService_readSystemInfo},
+    // 串口相关方法
+    {"nativeOpen", "(Ljava/lang/String;I)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_nativeOpen},
+    {"nativeClose", "()V", (void*)Java_com_example_myapplication3_RK3588HardwareService_nativeClose},
+    {"nativeRead", "([BI)I", (void*)Java_com_example_myapplication3_RK3588HardwareService_nativeRead},
+    {"nativeWrite", "([BI)I", (void*)Java_com_example_myapplication3_RK3588HardwareService_nativeWrite},
+    {"nativeIsOpen", "()Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_nativeIsOpen},
+    {"nativeSetParameters", "(IIII)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_nativeSetParameters}
 };
 
 /**
@@ -1010,34 +1043,9 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         return JNI_ERR;
     }
     
-    // 只注册RK3588HardwareService类的方法（前14个方法）
-    if (env->RegisterNatives(serviceClass, nativeMethods, 14) < 0) {
+    // 注册RK3588HardwareService类的方法（所有22个方法：16个原有方法 + 6个串口相关方法）
+    if (env->RegisterNatives(serviceClass, nativeMethods, 22) < 0) {
         LOGE("JNI_OnLoad: 注册RK3588HardwareService JNI方法失败");
-        return JNI_ERR;
-    }
-    
-    // 注册HardwareReader类的JNI方法
-    jclass readerClass = env->FindClass("com/example/myapplication3/HardwareReader");
-    if (readerClass == nullptr) {
-        LOGE("JNI_OnLoad: 找不到HardwareReader类");
-        return JNI_ERR;
-    }
-    
-    // 注册HardwareReader类的方法（从第14个方法开始，共3个方法）
-    if (env->RegisterNatives(readerClass, &nativeMethods[14], 3) < 0) {
-        LOGE("JNI_OnLoad: 注册HardwareReader JNI方法失败");
-        return JNI_ERR;
-    }
-    
-    // 注册SerialPortManager类的JNI方法
-    jclass serialClass = env->FindClass("com/example/myapplication3/SerialPortManager");
-    if (serialClass == nullptr) {
-        LOGE("JNI_OnLoad: 找不到SerialPortManager类");
-        return JNI_ERR;
-    }
-    
-    if (env->RegisterNatives(serialClass, serialMethods, sizeof(serialMethods)/sizeof(serialMethods[0])) < 0) {
-        LOGE("JNI_OnLoad: 注册SerialPortManager JNI方法失败");
         return JNI_ERR;
     }
     

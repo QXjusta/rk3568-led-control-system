@@ -64,9 +64,10 @@ public class MainActivity extends AppCompatActivity {
     private static final long STATE_MONITOR_INTERVAL = 1000; // 1秒检测一次，更快响应
     // 应用启动时间记录
     private long appStartTime = 0;
-    // 用户控制状态标记（已弃用，硬件状态检测不再干扰用户操作）
-    // private boolean isUserControlling = false;
-    // private long lastUserControlTime = 0;
+    // 记录用户最后选择的模式
+    private String lastUserSelectedMode = "default-on";
+    // 记录关闭前的亮度值，用于重新开启时恢复
+    private int lastBrightnessBeforeTurnOff = 255;
     
     /**
      * 硬件服务连接回调
@@ -196,6 +197,9 @@ public class MainActivity extends AppCompatActivity {
         // 应用启动时立即同步硬件状态，确保界面与硬件状态一致
         syncHardwareState();
         
+        // 初始化亮度条状态
+        updateBrightnessSeekBarEnabledState();
+        
         addLogEntry("应用已就绪，Work灯控制功能可用");
     }
 
@@ -285,6 +289,8 @@ public class MainActivity extends AppCompatActivity {
                         showErrorDialog("硬件错误", error);
                     });
                 }
+                
+                
             });
             
             // 尝试连接硬件
@@ -422,9 +428,10 @@ public class MainActivity extends AppCompatActivity {
     }
     
     /**
-     * 同步硬件状态
+     * 同步硬件状态到UI
      */
     private void syncHardwareState() {
+        // 移除用户操作检测逻辑，始终进行状态同步
         if (hardwareService != null) {
             // 直接获取LED状态，不依赖网络连接状态
             RK3588HardwareService.LEDState state = hardwareService.getLEDState();
@@ -492,70 +499,50 @@ public class MainActivity extends AppCompatActivity {
                       ", mode=" + state.mode + 
                       ", UI状态: " + currentUIState);
                 
-                // 重要：只有当硬件状态确实发生变化且与UI状态不一致时才更新UI
-                // 避免用户手动操作被硬件状态检测覆盖
-                
-                // 应用启动时只读取系统状态，不进行任何ADB模式切换检测
-                // 这样可以确保应用启动时不会改变LED的当前状态
-                boolean isADBModeChange = false;
-                Log.d("StateDebug", "应用启动阶段：只读取系统状态，不进行ADB模式切换检测");
-                
-                // 只有当硬件状态确实发生变化且与UI状态不一致时才更新UI
-                // 如果是ADB模式切换，不强制更新开关状态
-                if (state.powerOn != currentUIState && !isADBModeChange) {
-                    // 先更新开关状态，但暂时移除监听器避免触发硬件控制
-                    workLedSwitch.setOnCheckedChangeListener(null);
-                    workLedSwitch.setChecked(state.powerOn);
-                    updateWorkLedStatus(state.powerOn);
-                    
-                    // 重新设置监听器
-                    workLedSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                        updateWorkLedStatus(isChecked);
-                        addLogEntry(isChecked ? "Work灯开启" : "Work灯关闭");
-                        Log.d("WorkLEDControl", "Work灯开关状态改变: " + (isChecked ? "开启" : "关闭"));
-                        controlWorkLED(isChecked);
-                    });
-                    
-                    // 记录外部状态变化
-                    addLogEntry("检测到外部状态变化: Work灯" + (state.powerOn ? "开启" : "关闭"));
-                    Log.d("StateMonitor", "检测到外部状态变化: Work灯" + (state.powerOn ? "开启" : "关闭"));
-                }
-                
-                // 更新模式卡片状态（根据当前模式字符串）
-                if (state.mode != null) {
+                // 简化模式检测逻辑：只在LED开启时检测模式
+                if (state.mode != null && state.powerOn) {
                     String currentMode = state.mode.toLowerCase();
                     
                     // 添加调试日志
-                    Log.d("ModeDebug", "当前模式: " + state.mode + ", 小写后: " + currentMode);
+                    Log.d("ModeDebug", "LED开启状态，当前模式: " + state.mode + ", 小写后: " + currentMode);
                     
                     // 根据当前模式更新卡片选择状态
-                if (currentMode.contains("heartbeat")) {
-                    Log.d("ModeDebug", "匹配到心跳模式");
-                    updateModeCardSelection(modeDefaultOnCard, false);
-                    updateModeCardSelection(modeHeartbeatCard, true);
-                    updateModeCardSelection(modeTimerCard, false);
-                    // 更新用户最后选择的模式为当前检测到的模式
-                    lastUserSelectedMode = "heartbeat";
-                    addLogEntry("检测到外部模式变化: 呼吸灯模式，记录用户选择模式");
-                } else if (currentMode.contains("timer")) {
-                    Log.d("ModeDebug", "匹配到定时器模式");
-                    updateModeCardSelection(modeDefaultOnCard, false);
-                    updateModeCardSelection(modeHeartbeatCard, false);
-                    updateModeCardSelection(modeTimerCard, true);
-                    // 更新用户最后选择的模式为当前检测到的模式
-                    lastUserSelectedMode = "timer";
-                    addLogEntry("检测到外部模式变化: 闪烁模式，记录用户选择模式");
-                } else if (currentMode.contains("default-on")) {
-                    Log.d("ModeDebug", "匹配到常亮模式");
-                    updateModeCardSelection(modeDefaultOnCard, true);
-                    updateModeCardSelection(modeHeartbeatCard, false);
-                    updateModeCardSelection(modeTimerCard, false);
-                    // 更新用户最后选择的模式为当前检测到的模式
-                    lastUserSelectedMode = "default-on";
-                    addLogEntry("检测到外部模式变化: 常亮模式，记录用户选择模式");
-                } else if (currentMode.contains("none")) {
+                    if (currentMode.contains("heartbeat")) {
+                        Log.d("ModeDebug", "匹配到心跳模式");
+                        updateModeCardSelection(modeDefaultOnCard, false);
+                        updateModeCardSelection(modeHeartbeatCard, true);
+                        updateModeCardSelection(modeTimerCard, false);
+                        // 更新用户最后选择的模式为当前检测到的模式
+                        if (!lastUserSelectedMode.equals("heartbeat")) {
+                            lastUserSelectedMode = "heartbeat";
+                            addLogEntry("检测到硬件模式: 呼吸灯模式，记录用户选择模式");
+                        }
+                    } else if (currentMode.contains("timer")) {
+                        Log.d("ModeDebug", "匹配到定时器模式");
+                        updateModeCardSelection(modeDefaultOnCard, false);
+                        updateModeCardSelection(modeHeartbeatCard, false);
+                        updateModeCardSelection(modeTimerCard, true);
+                        // 更新用户最后选择的模式为当前检测到的模式
+                        if (!lastUserSelectedMode.equals("timer")) {
+                            lastUserSelectedMode = "timer";
+                            addLogEntry("检测到硬件模式: 闪烁模式，记录用户选择模式");
+                        }
+                    } else if (currentMode.contains("default-on")) {
+                        Log.d("ModeDebug", "匹配到常亮模式");
+                        updateModeCardSelection(modeDefaultOnCard, true);
+                        updateModeCardSelection(modeHeartbeatCard, false);
+                        updateModeCardSelection(modeTimerCard, false);
+                        // 更新用户最后选择的模式为当前检测到的模式
+                        if (!lastUserSelectedMode.equals("default-on")) {
+                            lastUserSelectedMode = "default-on";
+                            addLogEntry("检测到硬件模式: 常亮模式，记录用户选择模式");
+                        }
+                    } else {
+                        Log.d("ModeDebug", "未匹配到任何模式，当前模式: " + currentMode);
+                    }
+                } else if (!state.powerOn) {
                     // LED关闭状态，显示为用户最后选择的模式
-                    Log.d("ModeDebug", "检测到LED关闭状态(none模式)，显示用户最后选择的模式: " + lastUserSelectedMode);
+                    Log.d("ModeDebug", "LED关闭状态，显示用户最后选择的模式: " + lastUserSelectedMode);
                     
                     // 根据用户最后选择的模式更新UI
                     if (lastUserSelectedMode.equals("heartbeat")) {
@@ -571,10 +558,53 @@ public class MainActivity extends AppCompatActivity {
                         updateModeCardSelection(modeHeartbeatCard, false);
                         updateModeCardSelection(modeTimerCard, false);
                     }
-                    addLogEntry("检测到LED关闭状态，显示用户最后选择的模式");
-                } else {
-                    Log.d("ModeDebug", "未匹配到任何模式，当前模式: " + currentMode);
+                    addLogEntry("LED关闭状态，显示用户最后选择的模式");
                 }
+                
+                // 简化逻辑：只有当硬件状态确实发生变化且与UI状态不一致时才更新UI
+                // 避免在用户操作时产生竞态条件
+                if (state.powerOn != currentUIState) {
+                    // 记录状态变化
+                    addLogEntry("检测到状态变化: Work灯" + (state.powerOn ? "开启" : "关闭"));
+                    Log.d("StateMonitor", "检测到状态变化: Work灯" + (state.powerOn ? "开启" : "关闭"));
+                    
+                    // 直接更新UI状态，不临时移除监听器
+                    // 这样可以避免竞态条件和状态同步问题
+                    workLedSwitch.setChecked(state.powerOn);
+                    updateWorkLedStatus(state.powerOn);
+                }
+                
+                // 同步亮度值：只有当亮度值发生变化时才更新UI
+                int currentUIBrightness = brightnessSeekBar.getProgress();
+                if (state.workBrightness != currentUIBrightness) {
+                    // 根据当前模式判断是否允许亮度调节
+                    String currentMode = getCurrentSelectedMode();
+                    
+                    if (currentMode.equals("default-on")) {
+                        // 常亮模式：同步亮度值
+                        brightnessSeekBar.setProgress(state.workBrightness);
+                        brightnessValueText.setText(String.format(getString(R.string.brightness_value_format), state.workBrightness));
+                        addLogEntry("检测到亮度变化: " + state.workBrightness);
+                        Log.d("StateMonitor", "常亮模式下亮度同步: " + state.workBrightness);
+                    } else if (currentMode.equals("heartbeat") || currentMode.equals("timer")) {
+                        // 呼吸灯/闪烁模式：根据开关状态锁定亮度
+                        boolean isLedOn = workLedSwitch.isChecked();
+                        final int finalBrightness; // 使用final变量
+                        if (isLedOn) {
+                            // 开启状态下锁定亮度为255
+                            finalBrightness = 255;
+                            Log.d("WorkLEDControl", "呼吸灯/闪烁模式开启状态，亮度锁定为255");
+                        } else {
+                            // 关闭状态下锁定亮度为0
+                            finalBrightness = 0;
+                            Log.d("WorkLEDControl", "呼吸灯/闪烁模式关闭状态，亮度锁定为0");
+                        }
+                        // 更新UI显示
+                        runOnUiThread(() -> {
+                            brightnessSeekBar.setProgress(finalBrightness);
+                            brightnessValueText.setText(String.format(getString(R.string.brightness_value_format), finalBrightness));
+                        });
+                    }
                 }
             }
             
@@ -591,7 +621,7 @@ public class MainActivity extends AppCompatActivity {
             if (enable) {
                 // 开启LED时，先设置模式再设置亮度
                 Log.d("WorkLEDControl", "开启Work灯，使用用户最后选择的模式: " + lastUserSelectedMode);
-                boolean modeSuccess = hardwareService.setWorkLEDMode(lastUserSelectedMode);
+                boolean modeSuccess = hardwareService.setWorkLEDMode(lastUserSelectedMode, true);
                 if (modeSuccess) {
                     // 设置亮度为当前亮度值
                     int currentBrightness = brightnessSeekBar.getProgress();
@@ -599,26 +629,30 @@ public class MainActivity extends AppCompatActivity {
                     
                     if (brightnessSuccess) {
                         addLogEntry("Work灯开启成功，模式: " + getModeDisplayName(lastUserSelectedMode));
-                        updateWorkLedStatus(true);
+                        // UI状态已经在开关监听器中更新，这里不需要重复更新
                         Log.d("WorkLEDControl", "Work灯开启成功，模式: " + lastUserSelectedMode);
                     } else {
                         addLogEntry("Work灯亮度设置失败，但模式已设置");
                         Log.w("WorkLEDControl", "Work灯亮度设置失败，但模式已设置");
+                        // 亮度设置失败，但模式已设置，LED可能处于开启状态
+                        // 让状态监控线程来同步实际状态
                     }
                 } else {
                     addLogEntry("Work灯模式设置失败，可能需要root权限");
                     Log.w("WorkLEDControl", "Work灯模式设置失败，可能需要root权限");
+                    // 模式设置失败，LED可能未开启，让状态监控线程来同步实际状态
                 }
             } else {
                 // 关闭LED时，保持当前模式，只设置亮度为0
                 boolean success = hardwareService.controlWorkLED(false);
                 if (success) {
                     addLogEntry("Work灯关闭成功（保持当前模式）");
-                    updateWorkLedStatus(false);
+                    // UI状态已经在开关监听器中更新，这里不需要重复更新
                     Log.d("WorkLEDControl", "Work灯关闭成功（保持当前模式）");
                 } else {
                     addLogEntry("Work灯关闭失败，可能需要root权限");
                     Log.w("WorkLEDControl", "Work灯关闭失败，可能需要root权限");
+                    // 关闭失败，LED可能仍处于开启状态，让状态监控线程来同步实际状态
                 }
             }
         } else {
@@ -628,14 +662,44 @@ public class MainActivity extends AppCompatActivity {
     }
     
     /**
-     * 控制Work灯亮度
+     * 控制Work灯亮度（根据模式智能调整）
      */
     private void controlWorkLEDBrightness(int brightness) {
         if (hardwareService != null) {
-            boolean success = hardwareService.setWorkLEDBrightness(brightness);
+            // 根据当前模式判断是否允许亮度控制
+            String currentMode = getCurrentSelectedMode();
+            
+            // 使用局部变量存储最终的亮度值
+            int finalBrightness = brightness;
+            
+            // 呼吸灯和闪烁模式下，如果开关开启则锁定亮度为255，关闭则锁定为0
+            if (currentMode.equals("heartbeat") || currentMode.equals("timer")) {
+                boolean isLedOn = workLedSwitch.isChecked();
+                
+                // 使用final变量存储最终的亮度值
+                final int finalBrightnessForLambda;
+                if (isLedOn) {
+                    // 开启状态下锁定亮度为255
+                    finalBrightnessForLambda = 255;
+                    finalBrightness = 255;
+                    Log.d("WorkLEDControl", "呼吸灯/闪烁模式开启状态，亮度锁定为255");
+                } else {
+                    // 关闭状态下锁定亮度为0
+                    finalBrightnessForLambda = 0;
+                    finalBrightness = 0;
+                    Log.d("WorkLEDControl", "呼吸灯/闪烁模式关闭状态，亮度锁定为0");
+                }
+                // 更新UI显示
+                runOnUiThread(() -> {
+                    brightnessSeekBar.setProgress(finalBrightnessForLambda);
+                    brightnessValueText.setText(String.format(getString(R.string.brightness_value_format), finalBrightnessForLambda));
+                });
+            }
+            
+            boolean success = hardwareService.setWorkLEDBrightness(finalBrightness);
             if (success) {
-                addLogEntry(String.format(getString(R.string.log_brightness_set), brightness));
-                Log.d("WorkLEDControl", "Work灯亮度设置成功: " + brightness);
+                addLogEntry(String.format(getString(R.string.log_brightness_set), finalBrightness));
+                Log.d("WorkLEDControl", "Work灯亮度设置成功: " + finalBrightness);
             } else {
                 addLogEntry("Work灯亮度控制失败，可能需要root权限");
                 Log.w("WorkLEDControl", "Work灯亮度控制失败，可能需要root权限");
@@ -651,7 +715,7 @@ public class MainActivity extends AppCompatActivity {
      */
     private void controlWorkLEDMode(String mode) {
         if (hardwareService != null) {
-            boolean success = hardwareService.setWorkLEDMode(mode);
+            boolean success = hardwareService.setWorkLEDMode(mode, true);
             if (success) {
                 // 保存用户选择的模式到SharedPreferences
                 SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
@@ -670,6 +734,8 @@ public class MainActivity extends AppCompatActivity {
             Log.e("WorkLEDControl", "硬件服务未就绪，无法控制Work灯模式");
         }
     }
+    
+    
     
     /**
      * 获取模式显示名称
@@ -763,139 +829,222 @@ public class MainActivity extends AppCompatActivity {
             .show();
     }
     
-    // 记录用户最后选择的模式
-    private String lastUserSelectedMode = "default-on";
-    
-    // ========== 修改现有监听器以集成硬件控制 ==========
+    // ========== 重新设计监听器逻辑 ==========
     
     private void initListeners() {
-        // Work灯开关监听器
+        // Work灯开关监听器 - 简化逻辑：只控制LED的开关状态
         workLedSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            updateWorkLedStatus(isChecked);
-            addLogEntry(isChecked ? "Work灯开启" : "Work灯关闭");
+            // 检查是否是用户操作（而不是状态同步）
+            boolean isUserInteraction = buttonView.isPressed();
             
-            // 添加详细的Logcat日志
-            Log.d("WorkLEDControl", "Work灯开关状态改变: " + (isChecked ? "开启" : "关闭"));
-            
-            // 控制Work灯
-            controlWorkLED(isChecked);
+            if (isUserInteraction) {
+                Log.d("WorkLEDControl", "用户操作：Work灯开关状态改变: " + (isChecked ? "开启" : "关闭"));
+                
+                if (isChecked) {
+                    // 开启LED：应用当前选择的模式
+                    String currentMode = getCurrentSelectedMode();
+                    controlWorkLEDMode(currentMode);
+                    addLogEntry("开启Work灯，模式: " + currentMode);
+                    
+                    // 根据模式设置亮度
+                    if (currentMode.equals("heartbeat") || currentMode.equals("timer")) {
+                        // 呼吸灯/闪烁模式：锁定亮度为255
+                        controlWorkLEDBrightness(255);
+                        Log.d("WorkLEDControl", "开启呼吸灯/闪烁模式，亮度锁定为255");
+                    } else {
+                        // 常亮模式：使用关闭前记录的亮度值，如果为0则设置为最小亮度1避免误关闭
+                        int brightnessToUse = lastBrightnessBeforeTurnOff;
+                        if (brightnessToUse == 0) {
+                            brightnessToUse = 1; // 设置为最小亮度避免误关闭
+                        }
+                        brightnessSeekBar.setProgress(brightnessToUse);
+                        brightnessValueText.setText(String.format(getString(R.string.brightness_value_format), brightnessToUse));
+                        controlWorkLEDBrightness(brightnessToUse);
+                        Log.d("WorkLEDControl", "开启常亮模式，使用关闭前记录的亮度: " + brightnessToUse);
+                    }
+                } else {
+                    // 关闭LED前记录当前亮度值
+                    lastBrightnessBeforeTurnOff = brightnessSeekBar.getProgress();
+                    Log.d("WorkLEDControl", "关闭LED前记录亮度值: " + lastBrightnessBeforeTurnOff);
+                    
+                    // 关闭LED：直接关闭，不改变模式
+                    controlWorkLED(false);
+                    addLogEntry("关闭Work灯");
+                }
+                
+                // 更新Work灯状态显示
+                updateWorkLedStatus(isChecked);
+                
+                // 更新亮度条状态
+                updateBrightnessSeekBarEnabledState();
+            }
         });
         
-        // 添加硬件测试按钮
-        MaterialButton hardwareTestButton = findViewById(R.id.hardwareTestButton);
-        if (hardwareTestButton != null) {
-            hardwareTestButton.setOnClickListener(v -> {
-                Intent intent = new Intent(MainActivity.this, HardwareTestActivity.class);
-                startActivity(intent);
-                addLogEntry("启动硬件测试界面");
-            });
-        }
-        
-        // 亮度控制监听器
+        // 亮度调节监听器 - 常亮模式下允许调节亮度
         brightnessSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    // 更新亮度值显示
+                    // 更新亮度显示文本
                     brightnessValueText.setText(String.format(getString(R.string.brightness_value_format), progress));
                     
-                    // 控制Work灯亮度
-                    controlWorkLEDBrightness(progress);
+                    // 只有在常亮模式下且LED开启时才允许实时调节亮度
+                    String currentMode = getCurrentSelectedMode();
+                    if (currentMode.equals("default-on") && workLedSwitch.isChecked()) {
+                        // 常亮模式且LED开启时，实时调节亮度
+                        // 如果亮度为0，设置为最小亮度1避免误关闭
+                        int adjustedBrightness = progress;
+                        if (progress == 0) {
+                            adjustedBrightness = 1;
+                            brightnessSeekBar.setProgress(1);
+                            brightnessValueText.setText(String.format(getString(R.string.brightness_value_format), 1));
+                            Log.d("WorkLEDControl", "亮度调节到0，调整为1避免误关闭");
+                        }
+                        controlWorkLEDBrightness(adjustedBrightness);
+                        Log.d("WorkLEDControl", "常亮模式下亮度调节: " + adjustedBrightness);
+                    }
                 }
             }
             
             @Override
             public void onStartTrackingTouch(SeekBar seekBar) {
-                // 开始拖动时不做处理
+                // 检查是否允许调节亮度
+                String currentMode = getCurrentSelectedMode();
+                if (currentMode.equals("default-on") && !workLedSwitch.isChecked()) {
+                    // 常亮模式下LED关闭时，禁止调节亮度
+                    seekBar.setEnabled(false);
+                    Log.d("WorkLEDControl", "常亮模式下LED关闭，禁止亮度调节");
+                }
             }
             
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
-                // 停止拖动时不做处理
+                // 用户停止调节亮度，恢复亮度条状态
+                String currentMode = getCurrentSelectedMode();
+                if (currentMode.equals("default-on")) {
+                    // 常亮模式下，根据LED开关状态设置亮度条是否可用
+                    updateBrightnessSeekBarEnabledState();
+                }
+                Log.d("WorkLEDControl", "用户亮度调节完成");
             }
         });
         
-        // 模式控制监听器 - 卡片按钮样式
+        // 模式控制监听器 - 简化逻辑：只切换模式，不控制LED开关状态
         // 根据保存的模式设置初始选中状态
         updateModeCardSelectionBasedOnSavedMode();
         
         modeDefaultOnCard.setOnClickListener(v -> {
-            updateModeCardSelection(modeDefaultOnCard, true);
-            updateModeCardSelection(modeHeartbeatCard, false);
-            updateModeCardSelection(modeTimerCard, false);
-            lastUserSelectedMode = "default-on";
-            
-            // 保存用户选择的模式到SharedPreferences
-            SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putString("lastUserSelectedMode", "default-on");
-            editor.apply();
-            
-            // 模式切换时保持原有的LED开关状态
-            boolean currentSwitchState = workLedSwitch.isChecked();
-            Log.d("ModeSwitch", "切换到常亮模式，保持开关状态: " + currentSwitchState);
-            
-            if (currentSwitchState) {
-                // 如果LED当前是开启状态，则应用新模式
-                controlWorkLEDMode("default-on");
-            } else {
-                // 如果LED当前是关闭状态，只记录模式选择，不实际控制硬件
-                addLogEntry("选择常亮模式（LED当前关闭，保持关闭状态）");
-                Log.d("ModeSwitch", "LED当前关闭，只记录模式选择，不控制硬件");
-            }
+            switchToMode("default-on", modeDefaultOnCard);
         });
         
         modeHeartbeatCard.setOnClickListener(v -> {
-            updateModeCardSelection(modeDefaultOnCard, false);
-            updateModeCardSelection(modeHeartbeatCard, true);
-            updateModeCardSelection(modeTimerCard, false);
-            lastUserSelectedMode = "heartbeat";
-            
-            // 保存用户选择的模式到SharedPreferences
-            SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putString("lastUserSelectedMode", "heartbeat");
-            editor.apply();
-            
-            // 模式切换时保持原有的LED开关状态
-            boolean currentSwitchState = workLedSwitch.isChecked();
-            Log.d("ModeSwitch", "切换到呼吸灯模式，保持开关状态: " + currentSwitchState);
-            
-            if (currentSwitchState) {
-                // 如果LED当前是开启状态，则应用新模式
-                controlWorkLEDMode("heartbeat");
-            } else {
-                // 如果LED当前是关闭状态，只记录模式选择，不实际控制硬件
-                addLogEntry("选择呼吸灯模式（LED当前关闭，保持关闭状态）");
-                Log.d("ModeSwitch", "LED当前关闭，只记录模式选择，不控制硬件");
-            }
+            switchToMode("heartbeat", modeHeartbeatCard);
         });
         
         modeTimerCard.setOnClickListener(v -> {
-            updateModeCardSelection(modeDefaultOnCard, false);
-            updateModeCardSelection(modeHeartbeatCard, false);
-            updateModeCardSelection(modeTimerCard, true);
-            lastUserSelectedMode = "timer";
-            
-            // 保存用户选择的模式到SharedPreferences
-            SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putString("lastUserSelectedMode", "timer");
-            editor.apply();
-            
-            // 模式切换时保持原有的LED开关状态
-            boolean currentSwitchState = workLedSwitch.isChecked();
-            Log.d("ModeSwitch", "切换到闪烁模式，保持开关状态: " + currentSwitchState);
-            
-            if (currentSwitchState) {
-                // 如果LED当前是开启状态，则应用新模式
-                controlWorkLEDMode("timer");
-            } else {
-                // 如果LED当前是关闭状态，只记录模式选择，不实际控制硬件
-                addLogEntry("选择闪烁模式（LED当前关闭，保持关闭状态）");
-                Log.d("ModeSwitch", "LED当前关闭，只记录模式选择，不控制硬件");
-            }
+            switchToMode("timer", modeTimerCard);
         });
+    }
+    
+    /**
+     * 获取当前选择的模式
+     */
+    private String getCurrentSelectedMode() {
+        // 通过检查卡片背景色来判断当前选择的模式
+        int selectedColor = getColor(R.color.colorPrimary);
+        
+        // 使用更可靠的方法检查背景色
+        int defaultOnColor = modeDefaultOnCard.getCardBackgroundColor().getDefaultColor();
+        int heartbeatColor = modeHeartbeatCard.getCardBackgroundColor().getDefaultColor();
+        int timerColor = modeTimerCard.getCardBackgroundColor().getDefaultColor();
+        
+        Log.d("ModeDetection", "模式卡片颜色 - 常亮: " + defaultOnColor + ", 呼吸灯: " + heartbeatColor + ", 闪烁: " + timerColor + ", 选中色: " + selectedColor);
+        
+        if (defaultOnColor == selectedColor) {
+            Log.d("ModeDetection", "检测到常亮模式");
+            return "default-on";
+        } else if (heartbeatColor == selectedColor) {
+            Log.d("ModeDetection", "检测到呼吸灯模式");
+            return "heartbeat";
+        } else if (timerColor == selectedColor) {
+            Log.d("ModeDetection", "检测到闪烁模式");
+            return "timer";
+        }
+        
+        // 如果无法检测到选中状态，使用保存的模式
+        SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
+        String savedMode = prefs.getString("lastUserSelectedMode", "default-on");
+        Log.d("ModeDetection", "无法检测模式，使用保存的模式: " + savedMode);
+        return savedMode;
+    }
+    
+    /**
+     * 切换到指定模式
+     */
+    private void switchToMode(String mode, MaterialCardView selectedCard) {
+        // 更新UI选择状态
+        updateModeCardSelection(modeDefaultOnCard, mode.equals("default-on"));
+        updateModeCardSelection(modeHeartbeatCard, mode.equals("heartbeat"));
+        updateModeCardSelection(modeTimerCard, mode.equals("timer"));
+        
+        lastUserSelectedMode = mode;
+        
+        // 保存用户选择的模式到SharedPreferences
+        SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString("lastUserSelectedMode", mode);
+        editor.apply();
+        
+        // 如果LED当前是开启状态，则应用新模式
+        boolean currentSwitchState = workLedSwitch.isChecked();
+        Log.d("ModeSwitch", "切换到模式: " + mode + ", LED开关状态: " + currentSwitchState);
+        
+        if (currentSwitchState) {
+            controlWorkLEDMode(mode);
+            addLogEntry("切换到模式: " + mode);
+            
+            // 模式切换后，根据新模式调整亮度控制
+            if (mode.equals("heartbeat") || mode.equals("timer")) {
+                // 呼吸灯/闪烁模式：锁定亮度为255
+                controlWorkLEDBrightness(255);
+                Log.d("ModeSwitch", "呼吸灯/闪烁模式，亮度锁定为255");
+            } else if (mode.equals("default-on")) {
+                // 常亮模式：保持当前亮度或使用默认值
+                int currentBrightness = brightnessSeekBar.getProgress();
+                controlWorkLEDBrightness(currentBrightness);
+                Log.d("ModeSwitch", "常亮模式，使用当前亮度: " + currentBrightness);
+            }
+        } else {
+            addLogEntry("选择模式: " + mode + "（LED当前关闭，保持关闭状态）");
+            Log.d("ModeSwitch", "LED当前关闭，只记录模式选择，不控制硬件");
+        }
+        
+        // 模式切换后更新亮度条状态
+        updateBrightnessSeekBarEnabledState();
+    }
+    
+    /**
+     * 更新亮度条启用状态
+     */
+    private void updateBrightnessSeekBarEnabledState() {
+        String currentMode = getCurrentSelectedMode();
+        boolean isLedOn = workLedSwitch.isChecked();
+        
+        // 只有在常亮模式下且LED开启时才允许调节亮度
+        boolean enabled = (currentMode.equals("default-on") && isLedOn);
+        
+        brightnessSeekBar.setEnabled(enabled);
+        
+        // 设置亮度条的视觉状态
+        if (enabled) {
+            brightnessSeekBar.setAlpha(1.0f);
+            brightnessValueText.setAlpha(1.0f);
+            Log.d("BrightnessControl", "亮度条已启用 - 模式: " + currentMode + ", LED状态: " + isLedOn);
+        } else {
+            brightnessSeekBar.setAlpha(0.5f);
+            brightnessValueText.setAlpha(0.5f);
+            Log.d("BrightnessControl", "亮度条已禁用 - 模式: " + currentMode + ", LED状态: " + isLedOn);
+        }
     }
     
     /**
@@ -973,4 +1122,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
 }
+
+
+
+
+
+
+
+
+
+
+
 

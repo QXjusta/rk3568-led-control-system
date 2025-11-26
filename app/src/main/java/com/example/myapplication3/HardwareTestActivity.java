@@ -11,7 +11,6 @@ import android.widget.LinearLayout;
 import android.view.View;
 
 public class HardwareTestActivity extends Activity {
-    private HardwareReader hardwareReader;
     private RK3588HardwareService hardwareService;
     private TextView resultTextView;
     private Handler handler;
@@ -20,8 +19,7 @@ public class HardwareTestActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // 初始化硬件读取器
-        hardwareReader = new HardwareReader();
+        // 初始化硬件服务
         hardwareService = new RK3588HardwareService();
         handler = new Handler(Looper.getMainLooper());
         
@@ -198,7 +196,7 @@ public class HardwareTestActivity extends Activity {
     
     private void testSystemInfo() {
         new Thread(() -> {
-            String systemInfo = hardwareReader.readSystemInfo();
+            String systemInfo = hardwareService.readSystemInfo();
             String result = "系统信息测试结果:\\n" + systemInfo;
             updateUI(result);
         }).start();
@@ -209,7 +207,7 @@ public class HardwareTestActivity extends Activity {
             StringBuilder result = new StringBuilder("设备权限测试结果:\\n");
             String[] devices = {"/dev/ttyS4", "/sys/class/leds/work/brightness", "/proc/version"};
             for (String device : devices) {
-                boolean hasPermission = hardwareReader.checkDevicePermissions(device);
+                boolean hasPermission = hardwareService.checkDevicePermissions(device);
                 result.append(device).append(": ").append(hasPermission ? "有权限" : "无权限").append("\\n");
             }
             updateUI(result.toString());
@@ -231,13 +229,13 @@ public class HardwareTestActivity extends Activity {
             
             // 测试系统信息
             result.append("2. 系统信息:\\n");
-            result.append(hardwareReader.readSystemInfo()).append("\\n\\n");
+            result.append(hardwareService.readSystemInfo()).append("\\n\\n");
             
             // 测试设备权限
             result.append("3. 设备权限检查:\\n");
             String[] devices = {"/dev/ttyS4", "/sys/class/leds/work/brightness", "/proc/version"};
             for (String device : devices) {
-                boolean hasPermission = hardwareReader.checkDevicePermissions(device);
+                boolean hasPermission = hardwareService.checkDevicePermissions(device);
                 result.append(device).append(": ").append(hasPermission ? "有权限" : "无权限").append("\\n");
             }
             
