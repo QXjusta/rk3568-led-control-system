@@ -1,0 +1,54 @@
+版本标记文件
+================
+
+版本名称: 移除TCP功能_保留硬件测试
+创建时间: 2025-11-25
+
+修改内容总结:
+==============
+
+1. 移除TCP通信功能
+   - 删除MainActivity.java中的TCP连接逻辑
+   - 删除RK3588HardwareService.java中的TCP相关代码
+   - 删除TCPManager.java文件
+   - 更新相关注释和描述
+
+2. 移除发送指令按钮
+   - 删除activity_main.xml中的发送指令按钮(applyButton)
+   - 更新界面描述为"硬件测试"
+   - 移除strings.xml中发送指令相关字符串
+
+3. 保留的核心功能
+   - Work灯控制功能
+   - 硬件状态监控
+   - 硬件测试界面
+   - 串口通信功能
+
+文件修改列表:
+============
+
+- app/src/main/res/layout/activity_main.xml
+  - 移除发送指令按钮
+  - 更新卡片标题和描述
+
+- app/src/main/res/values/strings.xml
+  - 移除command_title、command_hint、command_apply字符串
+
+- app/src/main/java/com/example/myapplication3/MainActivity.java
+  - 已移除TCP相关代码
+  - 保留硬件测试按钮功能
+
+- app/src/main/java/com/example/myapplication3/RK3588HardwareService.java
+  - 已移除TCP相关代码和内部类
+
+- 已删除文件: TCPManager.java
+
+应用状态:
+========
+- 编译状态: 成功
+- 运行状态: 正常
+- 功能状态: 仅保留串口通信和硬件测试功能
+
+备注:
+====
+此版本专注于硬件测试功能，移除了TCP通信依赖，简化了应用界面。

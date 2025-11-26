@@ -1,0 +1,35 @@
+<resources>
+    <string name="app_name">RK3588 LED灯控助手</string>
+    <string name="toolbar_subtitle">面向实训的远程灯光调试界面</string>
+    <string name="hero_title">RK3588 LED 实训工位</string>
+    <string name="hero_subtitle">通过串口/以太网下发指令，实时查看灯带状态、亮度和特效。</string>
+    <string name="hero_tips">提示：下发命令前请确认开发板与调试主机已成功联通。</string>
+    <string name="status_hint">连接成功 · 等待命令</string>
+    <string name="led_state_on">LED 已点亮</string>
+    <string name="led_state_off">LED 已关闭</string>
+    <!-- 硬件只支持开关功能，亮度调节和颜色选择相关字符串已移除 -->
+    <!-- 硬件只支持开关功能，动态模式相关字符串已移除 -->
+    <!-- 发送指令相关字符串已移除，仅保留硬件测试功能 -->
+    <string name="log_title">运行日志</string>
+    <string name="log_empty">暂无指令记录</string>
+    <string name="default_color">中性白</string>
+    <!-- 硬件只支持开关功能，动态模式默认值已移除 -->
+    <string name="log_led_on">LED 上电成功，进入高亮状态</string>
+    <string name="log_led_off">LED 关闭，线路保持待机</string>
+    <string name="log_brightness_changed">亮度调节至 %1$d%%</string>
+    <string name="brightness_title">亮度调节</string>
+    <string name="brightness_description">调节Work灯的亮度级别 (0-255)</string>
+    <string name="brightness_value_format">%d</string>
+    <string name="log_brightness_set">Work灯亮度设置为 %d</string>
+    <!-- 模式切换相关字符串 -->
+    <string name="mode_title">模式选择</string>
+    <string name="mode_description">选择Work灯的工作模式</string>
+    <string name="mode_default_on">常亮</string>
+    <string name="mode_heartbeat">呼吸灯</string>
+    <string name="mode_timer">闪烁</string>
+    <string name="log_mode_set">Work灯模式设置为 %s</string>
+    <!-- 硬件只支持开关功能，动态模式相关日志字符串已移除 -->
+    <string name="log_command_summary">指令下发 -> 状态:%1$s</string>
+    <string name="log_ready">界面就绪，等待操作</string>
+    <string name="log_line_format">[%1$s] %2$s</string>
+</resources>
