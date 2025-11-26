@@ -33,11 +33,24 @@
 - **开发框架**：Android Studio
 - **硬件通信**：
   - 应用层：Java代码通过JNI调用原生方法
-  - 原生层：C++代码通过sysfs文件系统访问硬件设备
-  - 驱动层：目前使用Linux内核自带的LED驱动框架，通过sysfs接口提供访问
+  - 原生层：C++代码优先尝试访问字符设备节点 `/dev/zhangsan_led`，只有在不可访问时才回退到sysfs方式
+  - 驱动层：
+    - 优先：使用自定义字符设备驱动（待开发）
+    - 回退：使用Linux内核自带的LED驱动框架，通过sysfs接口提供访问
 - **状态监控**：定期检测硬件状态，保持UI与硬件同步
 
 ### 3.2 硬件访问方式
+应用采用双层访问机制，优先使用字符设备节点，只有在不可访问时才回退到sysfs方式：
+
+#### 1. 优先：字符设备节点方式
+- **设备节点路径**：`/dev/zhangsan_led`
+- **访问方式**：通过open()、ioctl()等系统调用访问
+- **控制命令**：
+  - LED_SET_POWER：设置LED电源状态
+  - LED_SET_BRIGHTNESS：设置LED亮度
+  - LED_GET_STATE：获取LED状态
+
+#### 2. 回退：sysfs文件系统方式
 应用通过sysfs文件系统访问LED设备，主要使用以下设备节点：
 - `/sys/class/leds/work/trigger`：用于切换LED模式
 - `/sys/class/leds/work/brightness`：用于调节LED亮度
