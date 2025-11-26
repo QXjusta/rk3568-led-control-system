@@ -71,8 +71,19 @@ public class RK3588HardwareService extends Service {
     private volatile boolean shouldMonitorState = false;
     private int gpioState = 0; // GPIO状态
     
-    // Binder
+    // Binder - 同时支持本地绑定和远程绑定
     private final IBinder binder = new HardwareBinder();
+    
+    public class HardwareBinder extends Binder {
+        public RK3588HardwareService getService() {
+            // 安全检查：确保服务正在运行
+            if (!isRunning.get()) {
+                Log.w(TAG, "尝试获取已停止的服务实例");
+                return null;
+            }
+            return RK3588HardwareService.this;
+        }
+    }
     
     public interface HardwareCallback {
         void onConnectionStatusChanged(boolean connected);
@@ -88,17 +99,6 @@ public class RK3588HardwareService extends Service {
         void onGPIOStateChanged(boolean state);
         void onConnectionLost(String reason);
         void onHardwareError(String error);
-    }
-    
-    public class HardwareBinder extends Binder {
-        public RK3588HardwareService getService() {
-            // 安全检查：确保服务正在运行
-            if (!isRunning.get()) {
-                Log.w(TAG, "尝试获取已停止的服务实例");
-                return null;
-            }
-            return RK3588HardwareService.this;
-        }
     }
     
     @Override
@@ -968,11 +968,7 @@ public class RK3588HardwareService extends Service {
     public int getCurrentMode() {
         return currentMode;
     }
-    
-    /**
-     * LED状态类
-     */
-    public static class LEDState {
+    public static class LEDState implements android.os.Parcelable {
         public boolean powerOn = false;
         public int brightness = 50;
         public String mode = "NORMAL";
@@ -981,12 +977,53 @@ public class RK3588HardwareService extends Service {
         public boolean workFound = false;
         public boolean mmc2Found = false;
         
+        public LEDState() {
+        }
+        
+        protected LEDState(android.os.Parcel in) {
+            powerOn = in.readByte() != 0;
+            brightness = in.readInt();
+            mode = in.readString();
+            workBrightness = in.readInt();
+            mmc2Brightness = in.readInt();
+            workFound = in.readByte() != 0;
+            mmc2Found = in.readByte() != 0;
+        }
+        
+        public static final Creator<LEDState> CREATOR = new Creator<LEDState>() {
+            @Override
+            public LEDState createFromParcel(android.os.Parcel in) {
+                return new LEDState(in);
+            }
+            
+            @Override
+            public LEDState[] newArray(int size) {
+                return new LEDState[size];
+            }
+        };
+        
+        @Override
+        public int describeContents() {
+            return 0;
+        }
+        
+        @Override
+        public void writeToParcel(android.os.Parcel dest, int flags) {
+            dest.writeByte((byte) (powerOn ? 1 : 0));
+            dest.writeInt(brightness);
+            dest.writeString(mode);
+            dest.writeInt(workBrightness);
+            dest.writeInt(mmc2Brightness);
+            dest.writeByte((byte) (workFound ? 1 : 0));
+            dest.writeByte((byte) (mmc2Found ? 1 : 0));
+        }
+        
         @Override
         public String toString() {
             return "LEDState{" +
                     "powerOn=" + powerOn +
                     ", brightness=" + brightness +
-                    ", mode='" + mode + '\'' +
+                    ", mode='" + mode + "'" +
                     ", workBrightness=" + workBrightness +
                     ", mmc2Brightness=" + mmc2Brightness +
                     ", workFound=" + workFound +
@@ -995,9 +1032,5 @@ public class RK3588HardwareService extends Service {
         }
     }
 }
-
-/**
- * 串口管理器
- */
 
 
