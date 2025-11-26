@@ -12,7 +12,6 @@ JNIEXPORT jboolean JNICALL Java_com_example_myapplication3_RK3588HardwareService
 JNIEXPORT void JNICALL Java_com_example_myapplication3_RK3588HardwareService_closeLEDDevice(JNIEnv *, jobject);
 JNIEXPORT jboolean JNICALL Java_com_example_myapplication3_RK3588HardwareService_setLEDPower(JNIEnv *, jobject, jboolean);
 JNIEXPORT jboolean JNICALL Java_com_example_myapplication3_RK3588HardwareService_setLEDBrightness(JNIEnv *, jobject, jint);
-JNIEXPORT jboolean JNICALL Java_com_example_myapplication3_RK3588HardwareService_setLEDColor(JNIEnv *, jobject, jstring);
 JNIEXPORT jobject JNICALL Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *, jobject);
 
 // GPIO控制相关JNI函数

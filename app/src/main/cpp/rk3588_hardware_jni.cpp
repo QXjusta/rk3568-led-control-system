@@ -23,14 +23,12 @@ extern "C" {
 // LED控制命令
 #define LED_SET_POWER _IOW('L', 1, int)
 #define LED_SET_BRIGHTNESS _IOW('L', 2, int)
-#define LED_SET_COLOR _IOW('L', 3, char*)
 #define LED_GET_STATE _IOR('L', 4, struct led_state)
 
 // LED状态结构体
 struct led_state {
     int power_on;
     int brightness;
-    char color[32];
     char mode[32];
 };
 
@@ -148,46 +146,7 @@ Java_com_example_myapplication3_RK3588HardwareService_setLEDBrightness(JNIEnv *e
     return JNI_TRUE;
 }
 
-/**
- * 设置LED颜色
- */
-JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication3_RK3588HardwareService_setLEDColor(JNIEnv *env, jobject thiz,
-                                                                 jstring color) {
-    (void)env;  // 标记未使用参数
-    (void)thiz; // 标记未使用参数
-    
-    if (led_fd < 0) {
-        if (led_fd == -2) {
-            // 模拟模式
-            const char *color_str = env->GetStringUTFChars(color, nullptr);
-            if (color_str != nullptr) {
-                LOGI("模拟设置LED颜色: %s", color_str);
-                env->ReleaseStringUTFChars(color, color_str);
-            }
-            return JNI_TRUE;
-        }
-        LOGE("LED设备未打开");
-        return JNI_FALSE;
-    }
-    
-    const char *color_str = env->GetStringUTFChars(color, nullptr);
-    if (color_str == nullptr) {
-        LOGE("获取颜色字符串失败");
-        return JNI_FALSE;
-    }
-    
-    int ret = ioctl(led_fd, LED_SET_COLOR, (void*)color_str);
-    env->ReleaseStringUTFChars(color, color_str);
-    
-    if (ret < 0) {
-        LOGE("设置LED颜色失败: %s", strerror(errno));
-        return JNI_FALSE;
-    }
-    
-    LOGI("设置LED颜色: %s", color_str);
-    return JNI_TRUE;
-}
+
 
 /**
  * 获取LED状态
@@ -220,7 +179,6 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
     // 获取字段ID
     jfieldID powerOnField = env->GetFieldID(ledStateClass, "powerOn", "Z");
     jfieldID brightnessField = env->GetFieldID(ledStateClass, "brightness", "I");
-    jfieldID colorField = env->GetFieldID(ledStateClass, "color", "Ljava/lang/String;");
     jfieldID modeField = env->GetFieldID(ledStateClass, "mode", "Ljava/lang/String;");
     jfieldID workBrightnessField = env->GetFieldID(ledStateClass, "workBrightness", "I");
     jfieldID mmc2BrightnessField = env->GetFieldID(ledStateClass, "mmc2Brightness", "I");
@@ -228,7 +186,7 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
     jfieldID mmc2FoundField = env->GetFieldID(ledStateClass, "mmc2Found", "Z");
     
     if (powerOnField == nullptr || brightnessField == nullptr || 
-        colorField == nullptr || modeField == nullptr ||
+        modeField == nullptr ||
         workBrightnessField == nullptr || mmc2BrightnessField == nullptr ||
         workFoundField == nullptr || mmc2FoundField == nullptr) {
         LOGE("获取LEDState字段ID失败");
@@ -244,7 +202,9 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
     bool work_found = false;
     bool mmc2_found = false;
     bool power_on = false;
-    const char* mode_description = "直接控制";
+    const char* work_device_mode = "unknown";
+    const char* mmc2_device_mode = "unknown";
+    const char* device_mode = "unknown";
     bool device_found = false;
     
     for (int i = 0; i < num_devices; i++) {
@@ -257,7 +217,7 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
         
         int brightness_value = 0;
         bool current_device_found = false;
-        const char* device_mode = "未知模式";
+        const char* current_device_mode = "unknown";
         
         // 检查LED设备是否存在
         FILE* brightness_file = fopen(brightness_path, "r");
@@ -276,16 +236,13 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
                     
                     // 分析触发模式
                     if (strstr(trigger_content, "[heartbeat]") != NULL) {
-                        device_mode = "心跳模式";
-                        mode_description = "心跳模式";
+                        current_device_mode = "heartbeat";
                     } else if (strstr(trigger_content, "[timer]") != NULL) {
-                        device_mode = "定时器模式";
-                        mode_description = "定时器模式";
+                        current_device_mode = "timer";
                     } else if (strstr(trigger_content, "[default-on]") != NULL) {
-                        device_mode = "默认开启";
-                        mode_description = "默认开启";
+                        current_device_mode = "default-on";
                     } else if (strstr(trigger_content, "[mmc2]") != NULL) {
-                        device_mode = "MMC2硬件控制";
+                        current_device_mode = "mmc2";
                         // 对于mmc2硬件控制的设备，亮度值可能不准确
                         // 我们假设当设备处于mmc2模式时，LED是活动的
                         if (i == 1) { // mmc2::设备
@@ -296,13 +253,15 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
                     LOGI("LED设备 %s 触发模式: %s", led_name, trigger_content);
                 }
                 
-                // 分别记录两个设备的亮度
+                // 分别记录两个设备的亮度和模式
                 if (i == 0) { // work设备
                     work_brightness = brightness_value;
                     work_found = true;
+                    work_device_mode = current_device_mode;
                 } else { // mmc2::设备
                     mmc2_brightness = brightness_value;
                     mmc2_found = true;
+                    mmc2_device_mode = current_device_mode;
                 }
                 
                 // 只要有一个设备亮度>0，就认为电源开启
@@ -310,12 +269,19 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
                     power_on = true;
                 }
                 
-                LOGI("检测到LED设备 %s: 亮度=%d, 模式=%s", led_name, brightness_value, device_mode);
+                LOGI("检测到LED设备 %s: 亮度=%d, 模式=%s", led_name, brightness_value, current_device_mode);
             }
             fclose(brightness_file);
         } else {
             LOGI("LED设备 %s 不存在或无法访问: %s", led_name, brightness_path);
         }
+    }
+    
+    // 根据设备优先级选择要使用的模式（优先使用work设备的模式）
+    if (work_found) {
+        device_mode = work_device_mode;
+    } else if (mmc2_found) {
+        device_mode = mmc2_device_mode;
     }
     
     // 使用work设备的亮度作为主要显示值（如果work设备存在）
@@ -329,15 +295,12 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
     env->SetBooleanField(ledState, workFoundField, work_found);
     env->SetBooleanField(ledState, mmc2FoundField, mmc2_found);
     
-    // 设置颜色和模式
-    jstring colorStr = env->NewStringUTF("WHITE");
-    jstring modeStr = env->NewStringUTF(device_found ? mode_description : "设备未找到");
+    // 设置模式
+    jstring modeStr = env->NewStringUTF(device_found ? device_mode : "设备未找到");
     
-    env->SetObjectField(ledState, colorField, colorStr);
     env->SetObjectField(ledState, modeField, modeStr);
     
     // 释放本地引用
-    env->DeleteLocalRef(colorStr);
     env->DeleteLocalRef(modeStr);
     env->DeleteLocalRef(ledStateClass);
     
@@ -1004,7 +967,6 @@ static JNINativeMethod nativeMethods[] = {
     {"closeLEDDevice", "()V", (void*)Java_com_example_myapplication3_RK3588HardwareService_closeLEDDevice},
     {"setLEDPower", "(Z)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_setLEDPower},
     {"setLEDBrightness", "(I)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_setLEDBrightness},
-    {"setLEDColor", "(Ljava/lang/String;)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_setLEDColor},
     {"getLEDState", "()Lcom/example/myapplication3/RK3588HardwareService$LEDState;", (void*)Java_com_example_myapplication3_RK3588HardwareService_getLEDState},
     {"readGPIOState", "(I)I", (void*)Java_com_example_myapplication3_RK3588HardwareService_readGPIOState},
     {"initializeHardware", "()Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_initializeHardware},
@@ -1052,8 +1014,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         return JNI_ERR;
     }
     
-    // 只注册RK3588HardwareService类的方法（前15个方法）
-    if (env->RegisterNatives(serviceClass, nativeMethods, 15) < 0) {
+    // 只注册RK3588HardwareService类的方法（前14个方法）
+    if (env->RegisterNatives(serviceClass, nativeMethods, 14) < 0) {
         LOGE("JNI_OnLoad: 注册RK3588HardwareService JNI方法失败");
         return JNI_ERR;
     }
@@ -1065,8 +1027,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         return JNI_ERR;
     }
     
-    // 注册HardwareReader类的方法（从第15个方法开始，共3个方法）
-    if (env->RegisterNatives(readerClass, &nativeMethods[15], 3) < 0) {
+    // 注册HardwareReader类的方法（从第14个方法开始，共3个方法）
+    if (env->RegisterNatives(readerClass, &nativeMethods[14], 3) < 0) {
         LOGE("JNI_OnLoad: 注册HardwareReader JNI方法失败");
         return JNI_ERR;
     }

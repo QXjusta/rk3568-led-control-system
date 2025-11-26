@@ -665,9 +665,6 @@ public class RK3588HardwareService extends Service {
                         case "BRIGHTNESS":
                             state.brightness = Integer.parseInt(keyValue[1].trim());
                             break;
-                        case "COLOR":
-                            state.color = keyValue[1].trim();
-                            break;
                     }
                 }
             }
@@ -681,7 +678,6 @@ public class RK3588HardwareService extends Service {
     public native void closeLEDDevice();
     public native boolean setLEDPower(boolean powerOn);
     public native boolean setLEDBrightness(int brightness);
-    public native boolean setLEDColor(String color);
     public native LEDState getLEDState();
     public native int readGPIOState(int gpioPin);
     public native boolean initializeHardware();
@@ -737,7 +733,6 @@ public class RK3588HardwareService extends Service {
     public static class LEDState {
         public boolean powerOn = false;
         public int brightness = 50;
-        public String color = "WHITE";
         public String mode = "NORMAL";
         public int workBrightness = 0;
         public int mmc2Brightness = 0;
@@ -749,7 +744,6 @@ public class RK3588HardwareService extends Service {
             return "LEDState{" +
                     "powerOn=" + powerOn +
                     ", brightness=" + brightness +
-                    ", color='" + color + '\'' +
                     ", mode='" + mode + '\'' +
                     ", workBrightness=" + workBrightness +
                     ", mmc2Brightness=" + mmc2Brightness +

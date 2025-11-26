@@ -485,6 +485,37 @@ public class MainActivity extends AppCompatActivity {
                     addLogEntry("检测到外部状态变化: Work灯" + (workLedOn ? "开启" : "关闭"));
                     Log.d("StateMonitor", "检测到外部状态变化: Work灯" + (workLedOn ? "开启" : "关闭"));
                 }
+                
+                // 更新模式卡片状态（根据当前模式字符串）
+                if (state.mode != null) {
+                    String currentMode = state.mode.toLowerCase();
+                    
+                    // 添加调试日志
+                    Log.d("ModeDebug", "当前模式: " + state.mode + ", 小写后: " + currentMode);
+                    
+                    // 根据当前模式更新卡片选择状态
+                    if (currentMode.contains("heartbeat")) {
+                        Log.d("ModeDebug", "匹配到心跳模式");
+                        updateModeCardSelection(modeDefaultOnCard, false);
+                        updateModeCardSelection(modeHeartbeatCard, true);
+                        updateModeCardSelection(modeTimerCard, false);
+                        addLogEntry("检测到外部模式变化: 呼吸灯模式");
+                    } else if (currentMode.contains("timer")) {
+                        Log.d("ModeDebug", "匹配到定时器模式");
+                        updateModeCardSelection(modeDefaultOnCard, false);
+                        updateModeCardSelection(modeHeartbeatCard, false);
+                        updateModeCardSelection(modeTimerCard, true);
+                        addLogEntry("检测到外部模式变化: 闪烁模式");
+                    } else if (currentMode.contains("default-on")) {
+                        Log.d("ModeDebug", "匹配到常亮模式");
+                        updateModeCardSelection(modeDefaultOnCard, true);
+                        updateModeCardSelection(modeHeartbeatCard, false);
+                        updateModeCardSelection(modeTimerCard, false);
+                        addLogEntry("检测到外部模式变化: 常亮模式");
+                    } else {
+                        Log.d("ModeDebug", "未匹配到任何模式，当前模式: " + currentMode);
+                    }
+                }
             }
             
             addLogEntry("UI已同步硬件状态");
