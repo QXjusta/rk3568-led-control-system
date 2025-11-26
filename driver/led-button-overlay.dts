@@ -1,0 +1,51 @@
+// LED和按键设备树覆盖文件
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "rockchip,rk3588";
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            zhangsan_led { // 使用组长名字命名
+                compatible = "zhangsan,led";
+                status = "okay";
+                
+                // LED GPIO配置 - 根据实际硬件连接修改
+                // 示例：使用GPIO1_A0 (引脚号32)
+                led-gpios = <&gpio1 0 GPIO_ACTIVE_HIGH>;
+                
+                // 按键GPIO配置 - 根据实际硬件连接修改
+                // 示例：使用GPIO1_A1 (引脚号33)，下拉输入
+                button-gpios = <&gpio1 1 GPIO_ACTIVE_LOW>;
+                
+                pinctrl-names = "default";
+                pinctrl-0 = <&led_gpio &button_gpio>;
+            };
+        };
+    };
+    
+    fragment@1 {
+        target = <&pinctrl>;
+        __overlay__ {
+            led_button_pins: led-button-pins {
+                led_gpio: led-gpio {
+                    rockchip,pins = <1 0 RK_FUNC_GPIO &pcfg_pull_none>;
+                };
+                
+                button_gpio: button-gpio {
+                    rockchip,pins = <1 1 RK_FUNC_GPIO &pcfg_pull_down>;
+                };
+            };
+        };
+    };
+};
+
+// 引脚配置参数
+&pcfg_pull_none {
+    bias-disable;
+};
+
+&pcfg_pull_down {
+    bias-pull-down;
+};

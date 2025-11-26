@@ -46,6 +46,9 @@ public class RK3588HardwareService extends Service {
     private static final String DEFAULT_SERIAL_PORT = "/dev/ttyS4"; // RK3588开发板常见串口
     private static final int DEFAULT_BAUD_RATE = 115200;
     
+    // LED设备节点配置 - 根据实训要求，使用组长名字命名
+    private static final String LED_DEVICE_NODE = "/dev/zhangsan_led"; // 替换为实际组长名字
+    
     // 通信状态
     private AtomicBoolean isConnected = new AtomicBoolean(false);
     private AtomicBoolean isRunning = new AtomicBoolean(false);
@@ -115,6 +118,10 @@ public class RK3588HardwareService extends Service {
             shouldMonitorState = false;
             
             // 原生库已在静态代码块中加载
+            
+            // 检查硬件访问权限
+            checkHardwarePermissions();
+            
             Log.d(TAG, "硬件通信服务创建成功");
         } catch (Exception e) {
             Log.e(TAG, "硬件通信服务创建失败: " + e.getMessage());
@@ -123,6 +130,33 @@ public class RK3588HardwareService extends Service {
                 executorService.shutdownNow();
             }
             throw new RuntimeException("硬件通信服务初始化失败", e);
+        }
+    }
+    
+    /**
+     * 检查硬件访问权限
+     */
+    private void checkHardwarePermissions() {
+        Log.d(TAG, "开始检查硬件访问权限");
+        
+        // 检查root权限
+        boolean hasRoot = checkRootPermission();
+        Log.d(TAG, "Root权限检查结果: " + hasRoot);
+        
+        // 检查GPIO sysfs路径权限
+        String gpioSysfsPath = "/sys/class/gpio/";
+        boolean hasGPIOPermission = checkDevicePermissions(gpioSysfsPath);
+        Log.d(TAG, "GPIO sysfs权限检查结果: " + hasGPIOPermission);
+        
+        // 检查export文件权限
+        String exportPath = "/sys/class/gpio/export";
+        boolean hasExportPermission = checkDevicePermissions(exportPath);
+        Log.d(TAG, "GPIO export文件权限检查结果: " + hasExportPermission);
+        
+        // 如果没有权限，记录警告
+        if (!hasRoot || !hasGPIOPermission || !hasExportPermission) {
+            Log.w(TAG, "硬件访问权限不足，将使用模拟模式");
+            Log.w(TAG, "建议：1. 获取root权限 2. 修改GPIO文件权限 3. 检查GPIO引脚号");
         }
     }
     

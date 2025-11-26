@@ -17,8 +17,8 @@ extern "C" {
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// 设备节点路径
-#define LED_DEVICE_NODE "/dev/led"
+// 设备节点路径 - 根据实训要求，使用组长名字命名
+#define LED_DEVICE_NODE "/dev/zhangsan_led"
 // GPIO设备节点定义 - RK3588使用sysfs方式访问GPIO，不需要直接打开设备节点
 #define GPIO_SYSFS_PATH "/sys/class/gpio/"
 #define SERIAL_DEVICE_NODE "/dev/ttyS4"
@@ -196,128 +196,145 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
         return nullptr;
     }
     
-    // 检查两个LED设备：work和mmc2::
-    const char* led_devices[] = {"work", "mmc2::"};
-    int num_devices = 2;
-    
+    // 初始化默认值
+    bool power_on = false;
+    int brightness_value = 0;
+    const char* device_mode = "unknown";
     int work_brightness = 0;
     int mmc2_brightness = 0;
     bool work_found = false;
     bool mmc2_found = false;
-    bool power_on = false;
-    const char* work_device_mode = "unknown";
-    const char* mmc2_device_mode = "unknown";
-    const char* device_mode = "unknown";
     bool device_found = false;
     
-    for (int i = 0; i < num_devices; i++) {
-        const char* led_name = led_devices[i];
-        char brightness_path[256];
-        char trigger_path[256];
-        char max_brightness_path[256];
-        
-        snprintf(brightness_path, sizeof(brightness_path), "/sys/class/leds/%s/brightness", led_name);
-        snprintf(trigger_path, sizeof(trigger_path), "/sys/class/leds/%s/trigger", led_name);
-        snprintf(max_brightness_path, sizeof(max_brightness_path), "/sys/class/leds/%s/max_brightness", led_name);
-        
-        int brightness_value = 0;
-        int max_brightness_value = 255; // 默认最大值
-        bool current_device_found = false;
-        const char* current_device_mode = "unknown";
-        bool current_power_on = false;
-        
-        // 检查LED设备是否存在
-        FILE* brightness_file = fopen(brightness_path, "r");
-        if (brightness_file != NULL) {
-            // 读取亮度值
-            if (fscanf(brightness_file, "%d", &brightness_value) == 1) {
-                current_device_found = true;
-                device_found = true;
-                
-                // 读取最大亮度值
-                FILE* max_brightness_file = fopen(max_brightness_path, "r");
-                if (max_brightness_file != NULL) {
-                    fscanf(max_brightness_file, "%d", &max_brightness_value);
-                    fclose(max_brightness_file);
-                }
-                
-                // 读取触发模式
-                FILE* trigger_file = fopen(trigger_path, "r");
-                char trigger_content[256] = {0};
-                if (trigger_file != NULL) {
-                    fgets(trigger_content, sizeof(trigger_content), trigger_file);
-                    fclose(trigger_file);
-                    
-                    // 分析触发模式
-                    if (strstr(trigger_content, "[heartbeat]") != NULL) {
-                        current_device_mode = "heartbeat";
-                    } else if (strstr(trigger_content, "[timer]") != NULL) {
-                        current_device_mode = "timer";
-                    } else if (strstr(trigger_content, "[default-on]") != NULL) {
-                        current_device_mode = "default-on";
-                    } else if (strstr(trigger_content, "[mmc2]") != NULL) {
-                        current_device_mode = "mmc2";
-                        // 对于mmc2硬件控制的设备，亮度值可能不准确
-                        // 我们假设当设备处于mmc2模式时，LED是活动的
-                        if (i == 1) { // mmc2::设备
-                            brightness_value = 255; // 设置为最大值表示活动状态
-                        }
-                    }
-                    
-                    LOGI("LED设备 %s 触发模式: %s", led_name, trigger_content);
-                }
-                
-                // 分别记录两个设备的亮度和模式
-                if (i == 0) { // work设备
-                    work_brightness = brightness_value;
-                    work_found = true;
-                    work_device_mode = current_device_mode;
-                    
-                    // 控制界面只关注work设备的状态
-                    // 修复电源状态判断逻辑：对于动态模式（heartbeat/timer），即使亮度为0也认为电源开启
-                    if (strcmp(current_device_mode, "heartbeat") == 0 || 
-                        strcmp(current_device_mode, "timer") == 0) {
-                        // 呼吸灯和闪烁模式：LED在亮灭之间切换，亮度值可能为0，但状态应为开启
-                        current_power_on = true;
-                    } else if (strcmp(current_device_mode, "mmc2") == 0) {
-                        // mmc2模式：硬件控制模式，状态应为开启
-                        current_power_on = true;
-                    } else {
-                        // 其他模式（default-on等）：基于亮度值判断
-                        current_power_on = (brightness_value > 0);
-                    }
-                    
-                    // 设置最终的电源状态（只使用work设备的状态）
-                    power_on = current_power_on;
-                    
-                } else { // mmc2::设备
-                    mmc2_brightness = brightness_value;
-                    mmc2_found = true;
-                    mmc2_device_mode = current_device_mode;
-                    
-                    // mmc2设备信息仅用于硬件测试，不影响控制界面的状态判断
-                    // 控制界面始终只使用work设备的状态
-                }
-                
-                LOGI("检测到LED设备 %s: 亮度=%d/%d, 模式=%s, 电源状态=%s", 
-                     led_name, brightness_value, max_brightness_value, current_device_mode, 
-                     current_power_on ? "开启" : "关闭");
-            }
-            fclose(brightness_file);
+    // 1. 优先尝试从字符设备节点获取LED状态（符合实训要求）
+    int led_fd = open(LED_DEVICE_NODE, O_RDONLY);
+    if (led_fd >= 0) {
+        struct led_state state;
+        int ret = ioctl(led_fd, LED_GET_STATE, &state);
+        if (ret >= 0) {
+            // 成功从设备节点获取状态
+            power_on = (state.power_on == 1);
+            brightness_value = state.brightness;
+            device_mode = state.mode;
+            work_brightness = state.brightness;
+            work_found = true;
+            device_found = true;
+            
+            LOGI("从设备节点 %s 获取LED状态: 电源=%s, 亮度=%d, 模式=%s", 
+                 LED_DEVICE_NODE, power_on ? "ON" : "OFF", brightness_value, device_mode);
         } else {
-            LOGI("LED设备 %s 不存在或无法访问: %s", led_name, brightness_path);
+            LOGI("从设备节点获取状态失败，将尝试sysfs方式: %s", strerror(errno));
+        }
+        close(led_fd);
+    } else {
+        LOGI("设备节点 %s 不可访问，将尝试sysfs方式: %s", LED_DEVICE_NODE, strerror(errno));
+    }
+    
+    // 2. 如果设备节点不可用，回退到sysfs方式（兼容现有实现）
+    if (!device_found) {
+        // 检查两个LED设备：work和mmc2::
+        const char* led_devices[] = {"work", "mmc2::"};
+        int num_devices = 2;
+        
+        for (int i = 0; i < num_devices; i++) {
+            const char* led_name = led_devices[i];
+            char brightness_path[256];
+            char trigger_path[256];
+            char max_brightness_path[256];
+            
+            snprintf(brightness_path, sizeof(brightness_path), "/sys/class/leds/%s/brightness", led_name);
+            snprintf(trigger_path, sizeof(trigger_path), "/sys/class/leds/%s/trigger", led_name);
+            snprintf(max_brightness_path, sizeof(max_brightness_path), "/sys/class/leds/%s/max_brightness", led_name);
+            
+            int brightness_val = 0;
+            int max_brightness_val = 255; // 默认最大值
+            bool current_device_found = false;
+            const char* current_device_mode = "unknown";
+            bool current_power_on = false;
+            
+            // 检查LED设备是否存在
+            FILE* brightness_file = fopen(brightness_path, "r");
+            if (brightness_file != NULL) {
+                // 读取亮度值
+                if (fscanf(brightness_file, "%d", &brightness_val) == 1) {
+                    current_device_found = true;
+                    device_found = true;
+                    
+                    // 读取最大亮度值
+                    FILE* max_brightness_file = fopen(max_brightness_path, "r");
+                    if (max_brightness_file != NULL) {
+                        fscanf(max_brightness_file, "%d", &max_brightness_val);
+                        fclose(max_brightness_file);
+                    }
+                    
+                    // 读取触发模式
+                    FILE* trigger_file = fopen(trigger_path, "r");
+                    char trigger_content[256] = {0};
+                    if (trigger_file != NULL) {
+                        fgets(trigger_content, sizeof(trigger_content), trigger_file);
+                        fclose(trigger_file);
+                        
+                        // 分析触发模式
+                        if (strstr(trigger_content, "[heartbeat]") != NULL) {
+                            current_device_mode = "heartbeat";
+                        } else if (strstr(trigger_content, "[timer]") != NULL) {
+                            current_device_mode = "timer";
+                        } else if (strstr(trigger_content, "[default-on]") != NULL) {
+                            current_device_mode = "default-on";
+                        } else if (strstr(trigger_content, "[mmc2]") != NULL) {
+                            current_device_mode = "mmc2";
+                            // 对于mmc2硬件控制的设备，亮度值可能不准确
+                            // 我们假设当设备处于mmc2模式时，LED是活动的
+                            if (i == 1) { // mmc2::设备
+                                brightness_val = 255; // 设置为最大值表示活动状态
+                            }
+                        }
+                        
+                        LOGI("LED设备 %s 触发模式: %s", led_name, trigger_content);
+                    }
+                    
+                    // 分别记录两个设备的亮度和模式
+                    if (i == 0) { // work设备
+                        work_brightness = brightness_val;
+                        work_found = true;
+                        device_mode = current_device_mode;
+                        
+                        // 控制界面只关注work设备的状态
+                        // 修复电源状态判断逻辑：对于动态模式（heartbeat/timer），即使亮度为0也认为电源开启
+                        if (strcmp(current_device_mode, "heartbeat") == 0 || 
+                            strcmp(current_device_mode, "timer") == 0) {
+                            // 呼吸灯和闪烁模式：LED在亮灭之间切换，亮度值可能为0，但状态应为开启
+                            current_power_on = true;
+                        } else if (strcmp(current_device_mode, "mmc2") == 0) {
+                            // mmc2模式：硬件控制模式，状态应为开启
+                            current_power_on = true;
+                        } else {
+                            // 其他模式（default-on等）：基于亮度值判断
+                            current_power_on = (brightness_val > 0);
+                        }
+                        
+                        // 设置最终的电源状态（只使用work设备的状态）
+                        power_on = current_power_on;
+                        brightness_value = brightness_val;
+                        
+                    } else { // mmc2::设备
+                        mmc2_brightness = brightness_val;
+                        mmc2_found = true;
+                        
+                        // mmc2设备信息仅用于硬件测试，不影响控制界面的状态判断
+                        // 控制界面始终只使用work设备的状态
+                    }
+                    
+                    LOGI("检测到LED设备 %s: 亮度=%d/%d, 模式=%s, 电源状态=%s", 
+                         led_name, brightness_val, max_brightness_val, current_device_mode, 
+                         current_power_on ? "开启" : "关闭");
+                }
+                fclose(brightness_file);
+            } else {
+                LOGI("LED设备 %s 不存在或无法访问: %s", led_name, brightness_path);
+            }
         }
     }
-    
-    // 控制界面只使用work设备的模式
-    if (work_found) {
-        device_mode = work_device_mode;
-    } else {
-        device_mode = "unknown";
-    }
-    
-    // 控制界面只使用work设备的亮度值
-    int brightness_value = work_found ? work_brightness : 0;
     
     // 设置LEDState对象的字段值
     env->SetBooleanField(ledState, powerOnField, power_on);
@@ -341,25 +358,152 @@ Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, j
 
 /**
  * 读取GPIO状态（用于物理按键监听）
+ * RK3588使用sysfs方式访问GPIO
  */
 JNIEXPORT jint JNICALL
 Java_com_example_myapplication3_RK3588HardwareService_readGPIOState(JNIEnv *env, jobject thiz,
                                                                    jint gpio_pin) {
     (void)env;  // 标记未使用参数
     (void)thiz; // 标记未使用参数
-    (void)gpio_pin; // 标记未使用参数
     
     static bool gpio_warning_logged = false; // 静态变量记录是否已记录警告
     
-    // RK3588使用sysfs方式访问GPIO，不需要直接打开设备节点
-    // 直接返回模拟值，避免不必要的设备访问
+    // 对于RK3588，GPIO引脚号需要转换
+    // 例如：GPIO1_0对应32，GPIO1_1对应33，以此类推
+    // 这里使用一个更安全的默认引脚（避免使用可能被占用的GPIO0）
+    int actual_gpio_pin = gpio_pin;
+    if (actual_gpio_pin == 0) {
+        actual_gpio_pin = 40; // 使用GPIO1_8（40）作为默认引脚，更可能可用
+    }
+    
+    // 构建GPIO sysfs路径
+    char gpio_path[128];
+    char value_path[128];
+    
+    // 1. 检查GPIO sysfs目录是否存在
+    if (access(GPIO_SYSFS_PATH, F_OK) != 0) {
+        if (!gpio_warning_logged) {
+            LOGI("GPIO sysfs目录不存在: %s", GPIO_SYSFS_PATH);
+        }
+        // 如果无法读取真实值，返回模拟值
+        if (!gpio_warning_logged) {
+            LOGI("无法读取GPIO %d 状态（权限不足或设备不存在），返回模拟值", actual_gpio_pin);
+            LOGI("建议：1. 获取root权限 2. 修改GPIO文件权限 3. 检查GPIO引脚号");
+            gpio_warning_logged = true;
+        }
+        return (actual_gpio_pin % 2) == 0 ? 0 : 1; // 返回模拟值，0表示低电平，1表示高电平
+    }
+    
+    // 2. 检查GPIO目录是否存在
+    snprintf(value_path, sizeof(value_path), "%sgpio%d", GPIO_SYSFS_PATH, actual_gpio_pin);
+    if (access(value_path, F_OK) != 0) {
+        // GPIO目录不存在，尝试导出
+        snprintf(gpio_path, sizeof(gpio_path), "%sexport", GPIO_SYSFS_PATH);
+        
+        // 先检查export文件是否可写
+        if (access(gpio_path, W_OK) != 0) {
+            if (!gpio_warning_logged) {
+                LOGI("无法访问GPIO导出文件 %s，权限不足", gpio_path);
+            }
+            // 如果无法读取真实值，返回模拟值
+            if (!gpio_warning_logged) {
+                LOGI("无法读取GPIO %d 状态（权限不足或设备不存在），返回模拟值", actual_gpio_pin);
+                LOGI("建议：1. 获取root权限 2. 修改GPIO文件权限 3. 检查GPIO引脚号");
+                gpio_warning_logged = true;
+            }
+            return (actual_gpio_pin % 2) == 0 ? 0 : 1; // 返回模拟值，0表示低电平，1表示高电平
+        }
+        
+        FILE *export_file = fopen(gpio_path, "w");
+        if (export_file) {
+            int result = fprintf(export_file, "%d", actual_gpio_pin);
+            fclose(export_file);
+            
+            if (result <= 0) {
+                if (!gpio_warning_logged) {
+                    LOGI("导出GPIO %d 写入失败", actual_gpio_pin);
+                }
+                // 如果无法读取真实值，返回模拟值
+                if (!gpio_warning_logged) {
+                    LOGI("无法读取GPIO %d 状态（权限不足或设备不存在），返回模拟值", actual_gpio_pin);
+                    LOGI("建议：1. 获取root权限 2. 修改GPIO文件权限 3. 检查GPIO引脚号");
+                    gpio_warning_logged = true;
+                }
+                return (actual_gpio_pin % 2) == 0 ? 0 : 1; // 返回模拟值，0表示低电平，1表示高电平
+            }
+            
+            // 等待导出完成
+            usleep(100000); // 等待100ms
+            
+            // 再次检查GPIO目录是否创建成功
+            if (access(value_path, F_OK) != 0) {
+                if (!gpio_warning_logged) {
+                    LOGI("GPIO %d 导出后目录未创建，可能引脚号无效", actual_gpio_pin);
+                }
+                // 如果无法读取真实值，返回模拟值
+                if (!gpio_warning_logged) {
+                    LOGI("无法读取GPIO %d 状态（权限不足或设备不存在），返回模拟值", actual_gpio_pin);
+                    LOGI("建议：1. 获取root权限 2. 修改GPIO文件权限 3. 检查GPIO引脚号");
+                    gpio_warning_logged = true;
+                }
+                return (actual_gpio_pin % 2) == 0 ? 0 : 1; // 返回模拟值，0表示低电平，1表示高电平
+            }
+        } else {
+            // 导出失败，可能是权限问题
+            if (!gpio_warning_logged) {
+                LOGI("无法导出GPIO %d，权限不足或设备不存在", actual_gpio_pin);
+            }
+            // 如果无法读取真实值，返回模拟值
+            if (!gpio_warning_logged) {
+                LOGI("无法读取GPIO %d 状态（权限不足或设备不存在），返回模拟值", actual_gpio_pin);
+                LOGI("建议：1. 获取root权限 2. 修改GPIO文件权限 3. 检查GPIO引脚号");
+                gpio_warning_logged = true;
+            }
+            return (actual_gpio_pin % 2) == 0 ? 0 : 1; // 返回模拟值，0表示低电平，1表示高电平
+        }
+    }
+    
+    // 3. 尝试读取GPIO值，不强制设置方向（避免权限问题）
+    snprintf(value_path, sizeof(value_path), "%sgpio%d/value", GPIO_SYSFS_PATH, actual_gpio_pin);
+    
+    // 检查value文件是否可读
+    if (access(value_path, R_OK) != 0) {
+        if (!gpio_warning_logged) {
+            LOGI("无法访问GPIO %d value文件，权限不足", actual_gpio_pin);
+        }
+        // 如果无法读取真实值，返回模拟值
+        if (!gpio_warning_logged) {
+            LOGI("无法读取GPIO %d 状态（权限不足或设备不存在），返回模拟值", actual_gpio_pin);
+            LOGI("建议：1. 获取root权限 2. 修改GPIO文件权限 3. 检查GPIO引脚号");
+            gpio_warning_logged = true;
+        }
+        return (actual_gpio_pin % 2) == 0 ? 0 : 1; // 返回模拟值，0表示低电平，1表示高电平
+    }
+    
+    FILE *value_file = fopen(value_path, "r");
+    if (value_file) {
+        int gpio_value = 0;
+        if (fscanf(value_file, "%d", &gpio_value) == 1) {
+            fclose(value_file);
+            
+            if (!gpio_warning_logged) {
+                LOGI("成功读取GPIO %d 状态: %d", actual_gpio_pin, gpio_value);
+                gpio_warning_logged = true;
+            }
+            
+            return gpio_value; // 返回真实的GPIO值
+        }
+        fclose(value_file);
+    }
+    
+    // 如果无法读取真实值，返回模拟值
     if (!gpio_warning_logged) {
-        LOGI("使用GPIO模拟模式 - RK3588通过sysfs访问GPIO，路径: %s", GPIO_SYSFS_PATH);
+        LOGI("无法读取GPIO %d 状态（权限不足或设备不存在），返回模拟值", actual_gpio_pin);
+        LOGI("建议：1. 获取root权限 2. 修改GPIO文件权限 3. 检查GPIO引脚号");
         gpio_warning_logged = true;
     }
     
-    // 返回模拟值，0表示低电平，1表示高电平
-    return (gpio_pin % 2) == 0 ? 0 : 1;
+    return (actual_gpio_pin % 2) == 0 ? 0 : 1; // 返回模拟值，0表示低电平，1表示高电平
 }
 
 /**
@@ -768,7 +912,7 @@ Java_com_example_myapplication3_RK3588HardwareService_nativeSetParameters(JNIEnv
 
 /**
  * 控制work LED设备
- * 改进版本：使用系统命令确保权限，正确处理模式切换
+ * 改进版本：优先使用字符设备节点，失败则回退到sysfs方式
  */
 JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication3_RK3588HardwareService_controlWorkLED(JNIEnv *env, jobject thiz,
@@ -777,7 +921,24 @@ Java_com_example_myapplication3_RK3588HardwareService_controlWorkLED(JNIEnv *env
     
     LOGI("尝试控制work LED设备: %s", enable ? "开启" : "关闭");
     
-    // 使用系统命令控制LED，确保权限正确
+    // 1. 优先尝试使用字符设备节点控制（符合实训要求）
+    int led_fd = open(LED_DEVICE_NODE, O_WRONLY);
+    if (led_fd >= 0) {
+        int power = enable ? 1 : 0;
+        int ret = ioctl(led_fd, LED_SET_POWER, &power);
+        close(led_fd);
+        
+        if (ret >= 0) {
+            LOGI("成功通过设备节点 %s 控制LED: %s", LED_DEVICE_NODE, enable ? "开启" : "关闭");
+            return JNI_TRUE;
+        } else {
+            LOGI("设备节点控制失败，将尝试sysfs方式: %s", strerror(errno));
+        }
+    } else {
+        LOGI("设备节点 %s 不可访问，将尝试sysfs方式: %s", LED_DEVICE_NODE, strerror(errno));
+    }
+    
+    // 2. 回退到sysfs方式（兼容现有实现）
     char command[512];
     
     if (enable) {
@@ -790,7 +951,7 @@ Java_com_example_myapplication3_RK3588HardwareService_controlWorkLED(JNIEnv *env
     
     int result = system(command);
     if (result == 0) {
-        LOGI("成功控制work设备: %s", enable ? "开启" : "关闭");
+        LOGI("成功通过sysfs控制work设备: %s", enable ? "开启" : "关闭");
         return JNI_TRUE;
     }
     
@@ -810,11 +971,6 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDBrightness(JNIEn
                                                                             jint brightness) {
     (void)thiz; // 标记未使用参数
     
-    const char* led_name = "work";
-    char brightness_path[256];
-    
-    snprintf(brightness_path, sizeof(brightness_path), "/sys/class/leds/%s/brightness", led_name);
-    
     LOGI("尝试设置work LED设备亮度: %d", brightness);
     
     // 验证亮度值范围
@@ -822,6 +978,28 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDBrightness(JNIEn
         LOGE("亮度值无效: %d (有效范围: 0-255)", brightness);
         return JNI_FALSE;
     }
+    
+    // 1. 优先尝试使用字符设备节点设置亮度（符合实训要求）
+    int led_fd = open(LED_DEVICE_NODE, O_WRONLY);
+    if (led_fd >= 0) {
+        int ret = ioctl(led_fd, LED_SET_BRIGHTNESS, &brightness);
+        close(led_fd);
+        
+        if (ret >= 0) {
+            LOGI("成功通过设备节点 %s 设置亮度: %d", LED_DEVICE_NODE, brightness);
+            return JNI_TRUE;
+        } else {
+            LOGI("设备节点设置亮度失败，将尝试sysfs方式: %s", strerror(errno));
+        }
+    } else {
+        LOGI("设备节点 %s 不可访问，将尝试sysfs方式: %s", LED_DEVICE_NODE, strerror(errno));
+    }
+    
+    // 2. 回退到sysfs方式（兼容现有实现）
+    const char* led_name = "work";
+    char brightness_path[256];
+    
+    snprintf(brightness_path, sizeof(brightness_path), "/sys/class/leds/%s/brightness", led_name);
     
     // 首先检查设备是否存在
     FILE* check_file = fopen(brightness_path, "r");
@@ -835,7 +1013,7 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDBrightness(JNIEn
     FILE* brightness_file = fopen(brightness_path, "w");
     if (brightness_file != NULL) {
         if (fprintf(brightness_file, "%d", brightness) > 0) {
-            LOGI("成功设置work设备亮度: %d", brightness);
+            LOGI("成功通过sysfs设置work设备亮度: %d", brightness);
             fclose(brightness_file);
             return JNI_TRUE;
         }
@@ -866,6 +1044,35 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
     
     LOGI("尝试设置work LED设备模式: %s, 应用硬件操作: %s", mode_str, apply_hardware ? "是" : "否");
     
+    // 1. 优先尝试使用字符设备节点设置模式（符合实训要求）
+    int led_fd = open(LED_DEVICE_NODE, O_WRONLY);
+    if (led_fd >= 0) {
+        // 根据模式决定LED状态
+        int power = 0;
+        
+        // 对于所有非关闭模式，都开启LED
+        if (strcmp(mode_str, "default-on") == 0 || 
+            strcmp(mode_str, "heartbeat") == 0 || 
+            strcmp(mode_str, "timer") == 0) {
+            power = 1;
+        }
+        
+        int ret = ioctl(led_fd, LED_SET_POWER, &power);
+        close(led_fd);
+        
+        if (ret >= 0) {
+            LOGI("成功通过设备节点 %s 设置模式: %s, LED状态: %s", 
+                 LED_DEVICE_NODE, mode_str, power ? "开启" : "关闭");
+            env->ReleaseStringUTFChars(mode, mode_str);
+            return JNI_TRUE;
+        } else {
+            LOGI("设备节点设置模式失败，将尝试sysfs方式: %s", strerror(errno));
+        }
+    } else {
+        LOGI("设备节点 %s 不可访问，将尝试sysfs方式: %s", LED_DEVICE_NODE, strerror(errno));
+    }
+    
+    // 2. 回退到sysfs方式（兼容现有实现）
     // 首先读取当前的亮度值，以便在模式切换后恢复
     int current_brightness = 0;
     FILE* brightness_file = fopen("/sys/class/leds/work/brightness", "r");
@@ -881,9 +1088,9 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
     if (strcmp(mode_str, "default-on") == 0) {
         trigger_mode = "default-on"; // 常亮模式
     } else if (strcmp(mode_str, "heartbeat") == 0) {
-        trigger_mode = "heartbeat"; // 呼吸灯模式（使用heartbeat作为呼吸效果）
+        trigger_mode = "heartbeat"; // 呼吸灯模式
     } else if (strcmp(mode_str, "timer") == 0) {
-        trigger_mode = "timer"; // 闪烁模式（使用timer作为闪烁效果）
+        trigger_mode = "timer"; // 闪烁模式
     } else {
         LOGI("未知模式: %s，使用默认模式", mode_str);
     }
@@ -903,29 +1110,16 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
     
     int result = system(command);
     if (result == 0) {
-        LOGI("成功设置work设备模式为: %s", trigger_mode);
+        LOGI("成功通过sysfs设置work设备模式为: %s", trigger_mode);
         
-        // 修复：只有当apply_hardware为false时才保持原有亮度状态
-        // 当用户主动开启LED时，应该设置亮度为255，而不是保持关闭状态
-        if (!apply_hardware && current_brightness == 0) {
-            LOGI("非硬件操作模式，保持LED关闭状态");
-            snprintf(command, sizeof(command), "echo 0 > /sys/class/leds/work/brightness");
-            int brightness_result = system(command);
-            if (brightness_result == 0) {
-                LOGI("成功保持LED关闭状态");
-            } else {
-                LOGI("保持LED关闭状态失败，命令执行返回码: %d", brightness_result);
-            }
-        } else if (apply_hardware) {
-            // 硬件操作模式：用户主动控制，设置亮度为255开启LED
-            LOGI("硬件操作模式，设置LED亮度为255");
-            snprintf(command, sizeof(command), "echo 255 > /sys/class/leds/work/brightness");
-            int brightness_result = system(command);
-            if (brightness_result == 0) {
-                LOGI("成功开启LED");
-            } else {
-                LOGI("开启LED失败，命令执行返回码: %d", brightness_result);
-            }
+        // 硬件操作模式：用户主动控制，设置亮度为255开启LED
+        LOGI("硬件操作模式，设置LED亮度为255");
+        snprintf(command, sizeof(command), "echo 255 > /sys/class/leds/work/brightness");
+        int brightness_result = system(command);
+        if (brightness_result == 0) {
+            LOGI("成功开启LED");
+        } else {
+            LOGI("开启LED失败，命令执行返回码: %d", brightness_result);
         }
         
         env->ReleaseStringUTFChars(mode, mode_str);
