@@ -291,8 +291,8 @@ public class MainActivity extends AppCompatActivity {
      */
     private void connectToHardware() {
         new Thread(() -> {
-            // 尝试串口连接
-            hardwareService.connectSerial("/dev/ttyS1", 115200);
+            // 尝试串口连接 - 使用RK3588开发板常见串口设备
+            hardwareService.connectSerial("/dev/ttyS4", 115200);
             boolean connected = hardwareService.isConnected();
             
             final boolean finalConnected = connected;
@@ -302,7 +302,8 @@ public class MainActivity extends AppCompatActivity {
                     syncHardwareState();
                 } else {
                     updateConnectionStatus("硬件连接失败");
-                    showConnectionErrorDialog("无法连接到硬件设备");
+                    // 显示更友好的错误提示，说明串口连接失败但LED控制仍可使用
+                    showConnectionErrorDialog("串口连接失败（设备不存在或权限不足），但LED控制功能仍可正常使用");
                 }
             });
         }).start();

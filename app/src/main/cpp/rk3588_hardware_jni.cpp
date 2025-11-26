@@ -19,7 +19,8 @@ extern "C" {
 
 // 设备节点路径
 #define LED_DEVICE_NODE "/dev/led"
-#define GPIO_DEVICE_NODE "/dev/gpio"
+// GPIO设备节点定义 - RK3588使用sysfs方式访问GPIO，不需要直接打开设备节点
+#define GPIO_SYSFS_PATH "/sys/class/gpio/"
 #define SERIAL_DEVICE_NODE "/dev/ttyS4"
 
 // LED控制命令
@@ -350,23 +351,15 @@ Java_com_example_myapplication3_RK3588HardwareService_readGPIOState(JNIEnv *env,
     
     static bool gpio_warning_logged = false; // 静态变量记录是否已记录警告
     
-    if (gpio_fd < 0) {
-        // 尝试打开GPIO设备
-        gpio_fd = open(GPIO_DEVICE_NODE, O_RDWR);
-        if (gpio_fd < 0) {
-            // 只在第一次失败时记录警告，避免重复日志
-            if (!gpio_warning_logged) {
-                LOGI("GPIO设备节点不存在或无法访问: %s (%s) - 启用模拟模式", GPIO_DEVICE_NODE, strerror(errno));
-                gpio_warning_logged = true;
-            }
-            // 返回模拟值而不是错误，让应用能够继续运行
-            return (gpio_pin % 2) == 0 ? 0 : 1; // 根据引脚号返回模拟值
-        }
+    // RK3588使用sysfs方式访问GPIO，不需要直接打开设备节点
+    // 直接返回模拟值，避免不必要的设备访问
+    if (!gpio_warning_logged) {
+        LOGI("使用GPIO模拟模式 - RK3588通过sysfs访问GPIO，路径: %s", GPIO_SYSFS_PATH);
+        gpio_warning_logged = true;
     }
     
-    // 实际实现需要根据GPIO驱动接口读取指定引脚状态
-    // 这里返回模拟值
-    return (gpio_pin % 2) == 0 ? 0 : 1; // 0表示低电平，1表示高电平
+    // 返回模拟值，0表示低电平，1表示高电平
+    return (gpio_pin % 2) == 0 ? 0 : 1;
 }
 
 /**

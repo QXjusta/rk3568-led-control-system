@@ -42,8 +42,8 @@ public class RK3588HardwareService extends Service {
     // 通信模式
     public static final int MODE_SERIAL = 1;
     
-    // 默认配置
-    private static final String DEFAULT_SERIAL_PORT = "/dev/ttyS4";
+    // 默认配置 - RK3588常见串口设备名称
+    private static final String DEFAULT_SERIAL_PORT = "/dev/ttyS4"; // RK3588开发板常见串口
     private static final int DEFAULT_BAUD_RATE = 115200;
     
     // 通信状态
