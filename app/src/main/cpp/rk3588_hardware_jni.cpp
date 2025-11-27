@@ -158,8 +158,8 @@ JNIEXPORT jobject JNICALL
 Java_com_example_myapplication3_RK3588HardwareService_getLEDState(JNIEnv *env, jobject thiz) {
     (void)thiz; // 标记未使用参数
     
-    // 获取LEDState类的引用
-    jclass ledStateClass = env->FindClass("com/example/myapplication3/RK3588HardwareService$LEDState");
+    // 获取LEDState类的引用（现在是独立类，不是内部类）
+    jclass ledStateClass = env->FindClass("com/example/myapplication3/LEDState");
     if (ledStateClass == nullptr) {
         LOGE("找不到LEDState类");
         return nullptr;
@@ -1188,7 +1188,7 @@ static JNINativeMethod nativeMethods[] = {
     {"closeLEDDevice", "()V", (void*)Java_com_example_myapplication3_RK3588HardwareService_closeLEDDevice},
     {"setLEDPower", "(Z)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_setLEDPower},
     {"setLEDBrightness", "(I)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_setLEDBrightness},
-    {"getLEDState", "()Lcom/example/myapplication3/RK3588HardwareService$LEDState;", (void*)Java_com_example_myapplication3_RK3588HardwareService_getLEDState},
+    {"getLEDState", "()Lcom/example/myapplication3/LEDState;", (void*)Java_com_example_myapplication3_RK3588HardwareService_getLEDState},
     {"readGPIOState", "(I)I", (void*)Java_com_example_myapplication3_RK3588HardwareService_readGPIOState},
     {"initializeHardware", "()Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_initializeHardware},
     {"checkDeviceNode", "(Ljava/lang/String;)Z", (void*)Java_com_example_myapplication3_RK3588HardwareService_checkDeviceNode},
