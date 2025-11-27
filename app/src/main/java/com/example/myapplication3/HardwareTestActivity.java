@@ -1,10 +1,14 @@
 package com.example.myapplication3;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
 import android.widget.Button;
 import android.widget.TextView;
@@ -14,22 +18,50 @@ import android.view.View;
 
 public class HardwareTestActivity extends Activity {
     private RK3588HardwareService hardwareService;
+    private boolean isHardwareBound = false;
     private TextView resultTextView;
     private Handler handler;
+    
+    /**
+     * 硬件服务连接回调
+     */
+    private final ServiceConnection hardwareServiceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            RK3588HardwareService.HardwareBinder binder = (RK3588HardwareService.HardwareBinder) service;
+            hardwareService = binder.getService();
+            isHardwareBound = true;
+            
+            // 自动测试并显示LED状态
+            autoTestLEDState();
+        }
+        
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            hardwareService = null;
+            isHardwareBound = false;
+        }
+    };
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // 初始化硬件服务
-        hardwareService = new RK3588HardwareService();
         handler = new Handler(Looper.getMainLooper());
         
         // 创建界面
         createUI();
         
-        // 自动测试并显示LED状态
-        autoTestLEDState();
+        // 绑定硬件服务
+        bindHardwareService();
+    }
+    
+    /**
+     * 绑定硬件服务
+     */
+    private void bindHardwareService() {
+        Intent intent = new Intent(this, RK3588HardwareService.class);
+        bindService(intent, hardwareServiceConnection, Context.BIND_AUTO_CREATE);
     }
     
     private void createUI() {
@@ -158,29 +190,37 @@ public class HardwareTestActivity extends Activity {
     
     private void autoTestLEDState() {
         new Thread(() -> {
-            RK3588HardwareService.LEDState state = hardwareService.getLEDState();
-            if (state != null) {
-                String result = formatLEDState(state);
-                updateUI("LED设备状态:\\n" + result);
+            if (hardwareService != null) {
+                LEDState state = hardwareService.getLEDState();
+                if (state != null) {
+                    String result = formatLEDState(state);
+                    updateUI("LED设备状态:\\n" + result);
+                } else {
+                    updateUI("LED设备状态:\\n无法读取LED状态");
+                }
             } else {
-                updateUI("LED设备状态:\\n无法读取LED状态");
+                updateUI("LED设备状态:\\n硬件服务未就绪");
             }
         }).start();
     }
     
     private void testLEDState() {
         new Thread(() -> {
-            RK3588HardwareService.LEDState state = hardwareService.getLEDState();
-            if (state != null) {
-                String result = formatLEDState(state);
-                updateUI("LED状态测试结果:\\n" + result);
+            if (hardwareService != null) {
+                LEDState state = hardwareService.getLEDState();
+                if (state != null) {
+                    String result = formatLEDState(state);
+                    updateUI("LED状态测试结果:\\n" + result);
+                } else {
+                    updateUI("LED状态测试结果:\\n无法读取LED状态");
+                }
             } else {
-                updateUI("LED状态测试结果:\\n无法读取LED状态");
+                updateUI("LED状态测试结果:\\n硬件服务未就绪");
             }
         }).start();
     }
     
-    private String formatLEDState(RK3588HardwareService.LEDState state) {
+    private String formatLEDState(LEDState state) {
         StringBuilder sb = new StringBuilder();
         sb.append("🔍 LED设备状态详情\n");
         sb.append("══════════════════════════\n");
@@ -265,11 +305,15 @@ public class HardwareTestActivity extends Activity {
     
     private void testSystemInfo() {
         new Thread(() -> {
-            String systemInfo = hardwareService.readSystemInfo();
-            String result = "📊 系统信息测试结果\n" +
-                          "══════════════════════════\n" +
-                          systemInfo;
-            updateUI(result);
+            if (hardwareService != null) {
+                String systemInfo = hardwareService.readSystemInfo();
+                String result = "📊 系统信息测试结果\n" +
+                              "══════════════════════════\n" +
+                              systemInfo;
+                updateUI(result);
+            } else {
+                updateUI("📊 系统信息测试结果\n══════════════════════════\n硬件服务未就绪");
+            }
         }).start();
     }
     
@@ -278,9 +322,13 @@ public class HardwareTestActivity extends Activity {
             StringBuilder result = new StringBuilder("🔐 设备权限测试结果\n");
             result.append("══════════════════════════\n");
             String[] devices = {"/dev/ttyS4", "/sys/class/leds/work/brightness", "/proc/version"};
-            for (String device : devices) {
-                boolean hasPermission = hardwareService.checkDevicePermissions(device);
-                result.append(hasPermission ? "✅ " : "❌ ").append(device).append(": ").append(hasPermission ? "有权限" : "无权限").append("\n");
+            if (hardwareService != null) {
+                for (String device : devices) {
+                    boolean hasPermission = hardwareService.checkDevicePermissions(device);
+                    result.append(hasPermission ? "✅ " : "❌ ").append(device).append(": ").append(hasPermission ? "有权限" : "无权限").append("\n");
+                }
+            } else {
+                result.append("❌ 硬件服务未就绪\n");
             }
             updateUI(result.toString());
         }).start();
@@ -291,28 +339,32 @@ public class HardwareTestActivity extends Activity {
             StringBuilder result = new StringBuilder("🔧 所有硬件测试结果\n");
             result.append("══════════════════════════\n\\n");
             
-            // 测试LED
-            result.append("1. 💡 LED状态\n");
-            result.append("──────────────────────────\n");
-            RK3588HardwareService.LEDState ledState = hardwareService.getLEDState();
-            if (ledState != null) {
-                result.append(formatLEDState(ledState)).append("\n\n");
+            if (hardwareService != null) {
+                // 测试LED
+                result.append("1. 💡 LED状态\n");
+                result.append("──────────────────────────\n");
+                LEDState ledState = hardwareService.getLEDState();
+                if (ledState != null) {
+                    result.append(formatLEDState(ledState)).append("\n\n");
+                } else {
+                    result.append("❌ 无法读取LED状态\n\n");
+                }
+                
+                // 测试系统信息
+                result.append("2. 📊 系统信息\n");
+                result.append("──────────────────────────\n");
+                result.append(hardwareService.readSystemInfo()).append("\n\n");
+                
+                // 测试设备权限
+                result.append("3. 🔐 设备权限检查\n");
+                result.append("──────────────────────────\n");
+                String[] devices = {"/dev/ttyS4", "/sys/class/leds/work/brightness", "/proc/version"};
+                for (String device : devices) {
+                    boolean hasPermission = hardwareService.checkDevicePermissions(device);
+                    result.append(hasPermission ? "✅ " : "❌ ").append(device).append(": ").append(hasPermission ? "有权限" : "无权限").append("\n");
+                }
             } else {
-                result.append("❌ 无法读取LED状态\n\n");
-            }
-            
-            // 测试系统信息
-            result.append("2. 📊 系统信息\n");
-            result.append("──────────────────────────\n");
-            result.append(hardwareService.readSystemInfo()).append("\n\n");
-            
-            // 测试设备权限
-            result.append("3. 🔐 设备权限检查\n");
-            result.append("──────────────────────────\n");
-            String[] devices = {"/dev/ttyS4", "/sys/class/leds/work/brightness", "/proc/version"};
-            for (String device : devices) {
-                boolean hasPermission = hardwareService.checkDevicePermissions(device);
-                result.append(hasPermission ? "✅ " : "❌ ").append(device).append(": ").append(hasPermission ? "有权限" : "无权限").append("\n");
+                result.append("❌ 硬件服务未就绪\n");
             }
             
             updateUI(result.toString());
@@ -325,55 +377,69 @@ public class HardwareTestActivity extends Activity {
         });
     }
     
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // 解绑硬件服务
+        if (isHardwareBound) {
+            unbindService(hardwareServiceConnection);
+            isHardwareBound = false;
+        }
+    }
+    
     private void controlWorkLED(final boolean enable) {
         new Thread(() -> {
-            boolean success = hardwareService.controlWorkLED(enable);
-            if (success) {
-                updateUI("✅ work灯控制成功: " + (enable ? "已开启" : "已关闭") + "\n\n🔄 正在更新状态...");
-                
-                // 延迟1秒后重新读取LED状态
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                
-                // 重新读取并显示LED状态
-                RK3588HardwareService.LEDState state = hardwareService.getLEDState();
-                if (state != null) {
-                    String result = formatLEDState(state);
-                    updateUI("✅ work灯控制成功: " + (enable ? "已开启" : "已关闭") + "\n\n" + result);
+            if (hardwareService != null) {
+                boolean success = hardwareService.controlWorkLED(enable);
+                if (success) {
+                    updateUI("✅ work灯控制成功: " + (enable ? "已开启" : "已关闭") + "\n\n🔄 正在更新状态...");
+                    
+                    // 延迟1秒后重新读取LED状态
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    
+                    // 重新读取并显示LED状态
+                    LEDState state = hardwareService.getLEDState();
+                    if (state != null) {
+                        String result = formatLEDState(state);
+                        updateUI("✅ work灯控制成功: " + (enable ? "已开启" : "已关闭") + "\n\n" + result);
+                    } else {
+                        updateUI("✅ work灯控制成功: " + (enable ? "已开启" : "已关闭") + "\n\n⚠️ 但无法读取最新状态");
+                    }
                 } else {
-                    updateUI("✅ work灯控制成功: " + (enable ? "已开启" : "已关闭") + "\n\n⚠️ 但无法读取最新状态");
+                    // 提供详细的错误信息和替代方案
+                    StringBuilder errorMessage = new StringBuilder();
+                    errorMessage.append("❌ work灯控制失败！\n");
+                    errorMessage.append("══════════════════════════\n\n");
+                    errorMessage.append("📋 原因分析：\n");
+                    errorMessage.append("• work设备需要root权限才能直接控制\n");
+                    errorMessage.append("• 当前应用运行在普通用户权限下\n\n");
+                    errorMessage.append("💡 替代解决方案：\n");
+                    errorMessage.append("1. 使用root权限运行应用\n");
+                    errorMessage.append("2. 通过ADB命令手动控制：\n");
+                    errorMessage.append("   开启: adb shell \"echo 255 > /sys/class/leds/work/brightness\"\n");
+                    errorMessage.append("   关闭: adb shell \"echo 0 > /sys/class/leds/work/brightness\"\n\n");
+                    errorMessage.append("3. 修改设备权限（需要root）：\n");
+                    errorMessage.append("   chmod 666 /sys/class/leds/work/brightness\n");
+                    errorMessage.append("   chmod 666 /sys/class/leds/work/trigger\n\n");
+                    errorMessage.append("📊 当前work设备状态：\n");
+                    
+                    // 显示当前work设备状态
+                    LEDState state = hardwareService.getLEDState();
+                    if (state != null && state.workFound) {
+                        errorMessage.append("• 亮度值: ").append(state.workBrightness).append("/255\n");
+                        errorMessage.append("• 状态: ").append(state.workBrightness > 0 ? "💡 亮" : "⚫ 灭").append("\n");
+                    } else {
+                        errorMessage.append("• ❌ 无法读取work设备状态\n");
+                    }
+                    
+                    updateUI(errorMessage.toString());
                 }
             } else {
-                // 提供详细的错误信息和替代方案
-                StringBuilder errorMessage = new StringBuilder();
-                errorMessage.append("❌ work灯控制失败！\n");
-                errorMessage.append("══════════════════════════\n\n");
-                errorMessage.append("📋 原因分析：\n");
-                errorMessage.append("• work设备需要root权限才能直接控制\n");
-                errorMessage.append("• 当前应用运行在普通用户权限下\n\n");
-                errorMessage.append("💡 替代解决方案：\n");
-                errorMessage.append("1. 使用root权限运行应用\n");
-                errorMessage.append("2. 通过ADB命令手动控制：\n");
-                errorMessage.append("   开启: adb shell \"echo 255 > /sys/class/leds/work/brightness\"\n");
-                errorMessage.append("   关闭: adb shell \"echo 0 > /sys/class/leds/work/brightness\"\n\n");
-                errorMessage.append("3. 修改设备权限（需要root）：\n");
-                errorMessage.append("   chmod 666 /sys/class/leds/work/brightness\n");
-                errorMessage.append("   chmod 666 /sys/class/leds/work/trigger\n\n");
-                errorMessage.append("📊 当前work设备状态：\n");
-                
-                // 显示当前work设备状态
-                RK3588HardwareService.LEDState state = hardwareService.getLEDState();
-                if (state != null && state.workFound) {
-                    errorMessage.append("• 亮度值: ").append(state.workBrightness).append("/255\n");
-                    errorMessage.append("• 状态: ").append(state.workBrightness > 0 ? "💡 亮" : "⚫ 灭").append("\n");
-                } else {
-                    errorMessage.append("• ❌ 无法读取work设备状态\n");
-                }
-                
-                updateUI(errorMessage.toString());
+                updateUI("❌ work灯控制失败：硬件服务未就绪\n");
             }
         }).start();
     }

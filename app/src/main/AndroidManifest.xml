@@ -53,13 +53,18 @@
         <!-- 硬件通信服务 -->
         <service android:name=".RK3588HardwareService"
             android:enabled="true"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.myapplication3.IRK3588HardwareService" />
+            </intent-filter>
+        </service>
             
-        <!-- 硬件测试Activity -->
+        <!-- 硬件测试Activity - 运行在独立进程 -->
         <activity
             android:name=".HardwareTestActivity"
             android:exported="true"
-            android:label="硬件测试" />
+            android:label="硬件测试"
+            android:process=":test" />
     </application>
 
 </manifest>

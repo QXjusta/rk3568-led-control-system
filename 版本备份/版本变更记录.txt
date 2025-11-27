@@ -240,14 +240,57 @@
 - ✅ 布局预览正常：无渲染错误
 - ✅ 所有功能保持完整
 
+版本 8 变更详情 (2025-11-27):
+---------------------------
+
+架构发现与优化:
+----------------
+1. 跨进程通信机制验证
+   - 确认应用成功实现跨进程通信
+   - MainActivity运行在默认进程，HardwareTestActivity运行在独立进程(:test)
+   - 两个Activity都能正常绑定到RK3588HardwareService并通信
+
+2. AIDL机制的隐式使用
+   - 发现：应用无需显式编写AIDL文件即可实现跨进程通信
+   - 原理：Android系统自动为本地Binder生成AIDL相关代码
+   - 优势：简化开发，保持代码简洁，系统自动处理所有跨进程细节
+   - 验证：删除显式AIDL文件后构建仍成功，应用正常运行
+
+3. LEDState类设计验证
+   - 结论：LEDState类应保持独立，不应放回服务类中
+   - 理由：
+     - 广泛的跨组件使用（服务、MainActivity、HardwareTestActivity）
+     - 跨进程通信需求，需实现Parcelable接口
+     - 清晰的职责分离，保持服务类简洁
+     - 更好的可维护性和扩展性
+
+4. 跨进程通信证据
+   - LEDState实现了Parcelable接口
+   - 服务标记为exported="true"
+   - 两个Activity在不同进程
+   - 本地Binder设计支持跨进程访问
+
+修改文件:
+--------
+- 删除了显式AIDL文件：
+  - app/src/main/aidl/com/example/myapplication3/IRK3588HardwareService.aidl
+  - app/src/main/aidl/com/example/myapplication3/LEDState.aidl
+
+验证结果:
+--------
+- ✅ 构建成功：无编译错误
+- ✅ 安装成功：已安装到设备rk3568_r - 11
+- ✅ 跨进程通信正常：两个Activity在不同进程中均可与服务通信
+- ✅ LEDState类独立设计有效：跨进程传输正常
+
 当前版本状态:
 ============
-- 版本号: 7
-- 版本名称: 修复activity_main.xml渲染问题
+- 版本号: 8
+- 版本名称: 跨进程通信架构优化
 - 编译状态: 成功
 - 运行状态: 正常
 - 功能状态: 完整
-- 布局预览: 正常
+- 跨进程通信: 正常
 
 备份文件 (按创建时间排序):
 ========================
@@ -258,3 +301,4 @@
 - 版本标记_完整实现LED控制系统双控制模式.txt (2025-11-27 00:23:33)
 - 版本标记_移除addLogEntry日志功能.txt (2025-11-27 01:16:22)
 - 版本标记_修复activity_main.xml渲染问题.txt (2025-01-18)
+- 版本标记_跨进程通信架构优化.txt (2025-11-27)

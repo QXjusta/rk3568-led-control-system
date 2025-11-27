@@ -23,6 +23,14 @@ android {
             }
         }
     }
+    
+    // AIDL配置 - 在Kotlin DSL中，sourceSets的配置方式不同
+    sourceSets {
+        named("main") {
+            java.srcDirs("src/main/java")
+            aidl.srcDirs("src/main/aidl")
+        }
+    }
 
     buildTypes {
         release {

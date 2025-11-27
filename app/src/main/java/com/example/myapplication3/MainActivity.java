@@ -97,7 +97,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 
                 @Override
-                public void onHardwareStateChanged(RK3588HardwareService.LEDState state) {
+                public void onHardwareStateChanged(LEDState state) {
                     runOnUiThread(() -> updateUIFromHardwareState(state));
                 }
             });
@@ -422,7 +422,7 @@ public class MainActivity extends AppCompatActivity {
         // 移除用户操作检测逻辑，始终进行状态同步
         if (hardwareService != null) {
             // 直接获取LED状态，不依赖网络连接状态
-            RK3588HardwareService.LEDState state = hardwareService.getLEDState();
+            LEDState state = hardwareService.getLEDState();
             if (state != null) {
                 updateUIFromHardwareState(state);
             }
@@ -436,7 +436,7 @@ public class MainActivity extends AppCompatActivity {
         // 解析硬件响应并更新UI
         if (data.contains("LED:")) {
             // 解析LED状态更新
-            RK3588HardwareService.LEDState state = parseLEDStateFromResponse(data);
+            LEDState state = parseLEDStateFromResponse(data);
             if (state != null) {
                 updateUIFromHardwareState(state);
             }
@@ -446,8 +446,8 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 从响应数据解析LED状态
      */
-    private RK3588HardwareService.LEDState parseLEDStateFromResponse(String data) {
-        RK3588HardwareService.LEDState state = new RK3588HardwareService.LEDState();
+    private LEDState parseLEDStateFromResponse(String data) {
+        LEDState state = new LEDState();
         try {
             String[] parts = data.split(",");
             for (String part : parts) {
@@ -469,7 +469,7 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 根据硬件状态更新UI
      */
-    private void updateUIFromHardwareState(RK3588HardwareService.LEDState state) {
+    private void updateUIFromHardwareState(LEDState state) {
         runOnUiThread(() -> {
             // 记录当前UI状态
             boolean currentUIState = workLedSwitch.isChecked();
