@@ -71,10 +71,56 @@ public class RK3588HardwareService extends Service {
     private volatile boolean shouldMonitorState = false;
     private int gpioState = 0; // GPIO状态
     
-    // Binder - 同时支持本地绑定和远程绑定
+    // Binder - 支持跨进程通信
     private final IBinder binder = new HardwareBinder();
     
     public class HardwareBinder extends Binder {
+        @Override
+        public boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags) throws android.os.RemoteException {
+            // 安全检查：确保服务正在运行
+            if (!isRunning.get()) {
+                Log.w(TAG, "尝试在已停止的服务上执行事务");
+                return false;
+            }
+            
+            try {
+                switch (code) {
+                    case 1: // getLEDState
+                        LEDState ledState = getLEDState();
+                        reply.writeInt(1); // 成功标志
+                        reply.writeString(ledState.toString());
+                        return true;
+                        
+                    case 2: // readSystemInfo
+                        String systemInfo = readSystemInfo();
+                        reply.writeInt(1); // 成功标志
+                        reply.writeString(systemInfo);
+                        return true;
+                        
+                    case 3: // checkDevicePermissions
+                        boolean hasPermissions = checkDevicePermissions("/dev/zhangsan_led");
+                        reply.writeInt(1); // 成功标志
+                        reply.writeInt(hasPermissions ? 1 : 0);
+                        return true;
+                        
+                    case 4: // controlWorkLED
+                        boolean ledStateParam = data.readInt() == 1;
+                        boolean result = controlWorkLED(ledStateParam);
+                        reply.writeInt(1); // 成功标志
+                        reply.writeInt(result ? 1 : 0);
+                        return true;
+                        
+                    default:
+                        return super.onTransact(code, data, reply, flags);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "跨进程通信异常: " + e.getMessage());
+                reply.writeInt(0); // 失败标志
+                reply.writeString("跨进程通信异常: " + e.getMessage());
+                return true;
+            }
+        }
+        
         public RK3588HardwareService getService() {
             // 安全检查：确保服务正在运行
             if (!isRunning.get()) {

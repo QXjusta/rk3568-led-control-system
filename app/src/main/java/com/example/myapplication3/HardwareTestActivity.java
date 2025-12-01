@@ -1,6 +1,7 @@
 package com.example.myapplication3;
 
 import android.app.Activity;
+import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -10,13 +11,16 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.RemoteException;
 import android.widget.Button;
-import android.widget.TextView;
-import android.widget.ScrollView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
 import android.view.View;
+import android.util.Log;
 
 public class HardwareTestActivity extends Activity {
+    private static final String TAG = "HardwareTestActivity";
     private RK3588HardwareService hardwareService;
     private boolean isHardwareBound = false;
     private TextView resultTextView;
@@ -28,12 +32,46 @@ public class HardwareTestActivity extends Activity {
     private final ServiceConnection hardwareServiceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
-            RK3588HardwareService.HardwareBinder binder = (RK3588HardwareService.HardwareBinder) service;
-            hardwareService = binder.getService();
-            isHardwareBound = true;
-            
-            // 自动测试并显示LED状态
-            autoTestLEDState();
+            try {
+                // 获取硬件服务实例（支持跨进程通信）
+                hardwareService = getHardwareServiceFromBinder(service);
+                
+                if (hardwareService == null) {
+                    Log.e(TAG, "获取硬件服务实例失败");
+                    updateUI("❌ 获取硬件服务实例失败");
+                    return;
+                }
+                
+                isHardwareBound = true;
+                
+                // 检查是否是跨进程通信
+                try {
+                    java.lang.reflect.Method queryMethod = service.getClass().getMethod("queryLocalInterface", String.class);
+                    Object localInterface = queryMethod.invoke(service, "com.example.myapplication3.RK3588HardwareService");
+                    
+                    if (localInterface instanceof RK3588HardwareService) {
+                        // 同进程通信
+                        updateUI("✅ 同进程通信模式\n══════════════════════════\n" + 
+                                "当前运行在主进程，可直接访问硬件服务\n" + 
+                                "开始测试硬件功能...");
+                    } else {
+                        // 跨进程通信
+                        updateUI("🌐 跨进程通信模式\n══════════════════════════\n" + 
+                                "当前运行在独立进程，通过Binder进行通信\n" + 
+                                "开始测试硬件功能...");
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "无法确定通信模式: " + e.getMessage());
+                    updateUI("⚠️ 通信模式未知\n══════════════════════════\n" + 
+                            "开始测试硬件功能...");
+                }
+                
+                // 自动测试并显示LED状态
+                autoTestLEDState();
+            } catch (Exception e) {
+                Log.e(TAG, "服务连接失败: " + e.getMessage());
+                updateUI("❌ 服务连接失败: " + e.getMessage());
+            }
         }
         
         @Override
@@ -61,7 +99,207 @@ public class HardwareTestActivity extends Activity {
      */
     private void bindHardwareService() {
         Intent intent = new Intent(this, RK3588HardwareService.class);
+        // 设置action以支持跨进程通信
+        intent.setAction("com.example.myapplication3.IRK3588HardwareService");
         bindService(intent, hardwareServiceConnection, Context.BIND_AUTO_CREATE);
+    }
+    
+    /**
+     * 从Binder获取硬件服务实例（跨进程通信）
+     */
+    private RK3588HardwareService getHardwareServiceFromBinder(IBinder service) {
+        try {
+            // 检查是否是跨进程通信
+            java.lang.reflect.Method queryMethod = service.getClass().getMethod("queryLocalInterface", String.class);
+            Object localInterface = queryMethod.invoke(service, "com.example.myapplication3.RK3588HardwareService");
+            
+            if (localInterface instanceof RK3588HardwareService) {
+                // 同进程通信，直接返回服务实例
+                return (RK3588HardwareService) localInterface;
+            } else {
+                // 跨进程通信，创建代理对象
+                return createCrossProcessProxy(service);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "跨进程通信处理失败: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * 从字符串解析LED状态
+     */
+    private LEDState parseLEDStateFromString(String ledStateStr) {
+        LEDState state = new LEDState();
+        
+        try {
+            // 解析格式：LEDState{powerOn=true, brightness=50, mode='default-on', workBrightness=50, mmc2Brightness=0, workFound=true, mmc2Found=false, color='WHITE'}
+            if (ledStateStr.startsWith("LEDState{")) {
+                String content = ledStateStr.substring(9, ledStateStr.length() - 1);
+                String[] pairs = content.split(", ");
+                
+                for (String pair : pairs) {
+                    String[] keyValue = pair.split("=");
+                    if (keyValue.length == 2) {
+                        String key = keyValue[0].trim();
+                        String value = keyValue[1].trim();
+                        
+                        switch (key) {
+                            case "powerOn":
+                                state.powerOn = "true".equals(value);
+                                break;
+                            case "brightness":
+                                state.brightness = Integer.parseInt(value);
+                                break;
+                            case "mode":
+                                state.mode = value.replace("'", "");
+                                break;
+                            case "workBrightness":
+                                state.workBrightness = Integer.parseInt(value);
+                                break;
+                            case "mmc2Brightness":
+                                state.mmc2Brightness = Integer.parseInt(value);
+                                break;
+                            case "workFound":
+                                state.workFound = "true".equals(value);
+                                break;
+                            case "mmc2Found":
+                                state.mmc2Found = "true".equals(value);
+                                break;
+                            // color字段已从LEDState类中移除，跳过处理
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "解析LED状态字符串失败: " + e.getMessage());
+        }
+        
+        return state;
+    }
+    
+    /**
+     * 创建跨进程通信代理
+     */
+    private RK3588HardwareService createCrossProcessProxy(final IBinder service) {
+        return new RK3588HardwareService() {
+            @Override
+            public LEDState getLEDState() {
+                android.os.Parcel data = android.os.Parcel.obtain();
+                android.os.Parcel reply = android.os.Parcel.obtain();
+                
+                try {
+                    boolean result = service.transact(1, data, reply, 0);
+                    if (result) {
+                        int success = reply.readInt();
+                        if (success == 1) {
+                            String ledStateStr = reply.readString();
+                            // 解析字符串格式的LED状态
+                            return parseLEDStateFromString(ledStateStr);
+                        } else {
+                            String error = reply.readString();
+                            Log.e(TAG, "跨进程获取LED状态失败: " + error);
+                        }
+                    }
+                } catch (android.os.RemoteException e) {
+                    Log.e(TAG, "跨进程通信异常: " + e.getMessage());
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+                
+                // 返回默认的LED状态
+                LEDState defaultState = new LEDState();
+                defaultState.powerOn = false;
+                defaultState.brightness = 0;
+                defaultState.mode = "unknown";
+                defaultState.workBrightness = 0;
+                defaultState.mmc2Brightness = 0;
+                defaultState.workFound = false;
+                defaultState.mmc2Found = false;
+                return defaultState;
+            }
+            
+            @Override
+            public String readSystemInfo() {
+                android.os.Parcel data = android.os.Parcel.obtain();
+                android.os.Parcel reply = android.os.Parcel.obtain();
+                
+                try {
+                    boolean result = service.transact(2, data, reply, 0);
+                    if (result) {
+                        int success = reply.readInt();
+                        if (success == 1) {
+                            return reply.readString();
+                        } else {
+                            String error = reply.readString();
+                            Log.e(TAG, "跨进程读取系统信息失败: " + error);
+                        }
+                    }
+                } catch (android.os.RemoteException e) {
+                    Log.e(TAG, "跨进程通信异常: " + e.getMessage());
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+                
+                return "跨进程通信：系统信息读取失败";
+            }
+            
+            @Override
+            public boolean checkDevicePermissions(String devicePath) {
+                android.os.Parcel data = android.os.Parcel.obtain();
+                android.os.Parcel reply = android.os.Parcel.obtain();
+                
+                try {
+                    data.writeString(devicePath);
+                    boolean result = service.transact(3, data, reply, 0);
+                    if (result) {
+                        int success = reply.readInt();
+                        if (success == 1) {
+                            return reply.readInt() == 1;
+                        } else {
+                            String error = reply.readString();
+                            Log.e(TAG, "跨进程检查权限失败: " + error);
+                        }
+                    }
+                } catch (android.os.RemoteException e) {
+                    Log.e(TAG, "跨进程通信异常: " + e.getMessage());
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+                
+                return false;
+            }
+            
+            @Override
+            public boolean controlWorkLED(boolean state) {
+                android.os.Parcel data = android.os.Parcel.obtain();
+                android.os.Parcel reply = android.os.Parcel.obtain();
+                
+                try {
+                    data.writeInt(state ? 1 : 0);
+                    boolean result = service.transact(4, data, reply, 0);
+                    if (result) {
+                        int success = reply.readInt();
+                        if (success == 1) {
+                            return reply.readInt() == 1;
+                        } else {
+                            String error = reply.readString();
+                            Log.e(TAG, "跨进程控制LED失败: " + error);
+                        }
+                    }
+                } catch (android.os.RemoteException e) {
+                    Log.e(TAG, "跨进程通信异常: " + e.getMessage());
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+                
+                return false;
+            }
+        };
     }
     
     private void createUI() {
@@ -228,8 +466,8 @@ public class HardwareTestActivity extends Activity {
         
         // 处理模式显示：当LED关闭时，显示用户最后选择的模式
         String displayMode = state.mode;
-        if ("unknown".equals(state.mode) || (!state.powerOn && !state.mode.equals("设备未找到"))) {
-            // 读取主页面保存的用户选择的模式（使用全局SharedPreferences）
+        if (!state.powerOn) {
+            // LED关闭状态：读取主页面保存的用户选择的模式（使用全局SharedPreferences）
             SharedPreferences prefs = getSharedPreferences("LEDControlPrefs", Context.MODE_PRIVATE);
             String lastUserSelectedMode = prefs.getString("lastUserSelectedMode", "default-on");
             
@@ -444,3 +682,6 @@ public class HardwareTestActivity extends Activity {
         }).start();
     }
 }
+
+// RK3588HardwareServiceProxy类已删除
+// 在AGP 8.0+中，系统会自动处理跨进程通信，无需手动创建代理类
