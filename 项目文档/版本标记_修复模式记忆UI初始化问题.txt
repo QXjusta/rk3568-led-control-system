@@ -1,0 +1,33 @@
+版本备份记录：修复模式记忆功能UI初始化问题
+==========================================
+
+备份时间：2025-11-26
+版本哈希：03e8b18
+
+修复内容：
+- 修复应用启动时模式UI未正确显示上次选择的问题
+- 新增updateModeCardSelectionBasedOnSavedMode方法
+- 移除硬编码的默认选中状态设置
+- 优化LED控制逻辑
+
+修改文件：
+1. app/src/main/java/com/example/myapplication3/MainActivity.java
+   - 新增updateModeCardSelectionBasedOnSavedMode方法
+   - 修改initListeners方法中的模式卡片初始化逻辑
+
+2. app/src/main/cpp/rk3588_hardware_jni.cpp
+   - 优化LED控制逻辑
+
+功能改进：
+- 应用启动时UI正确显示上次选择的模式
+- 模式切换时立即保存到SharedPreferences
+- LED关闭时保持当前模式，只设置亮度为0
+
+测试场景：
+1. 正常模式记忆：选择呼吸灯模式 → 关闭应用 → 重新打开 → UI显示呼吸灯模式为选中状态
+2. LED关闭状态记忆：选择闪烁模式 → 关闭LED → 关闭应用 → 重新打开 → UI显示闪烁模式为选中状态
+3. 模式切换保存：切换不同模式时立即保存，确保下次启动时正确恢复
+
+备注：
+- 此版本解决了用户反馈的"应用初始化界面时未选中对应的模式UI"问题
+- 模式记忆功能现在完全正常工作

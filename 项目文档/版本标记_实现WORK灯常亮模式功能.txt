@@ -1,0 +1,61 @@
+版本标记文件
+================
+
+版本名称: 实现WORK灯常亮模式功能
+创建时间: 2025-11-26
+
+修改内容总结:
+==============
+
+1. 实现WORK灯自动常亮模式功能
+   - 修改MainActivity.java中的setLedFilePermissions方法
+   - 在权限设置后自动设置WORK灯为常亮模式
+   - 添加非root方式下的WORK灯模式设置
+
+2. 关键功能改进
+   - 应用启动时自动设置WORK灯为default-on模式
+   - 设置WORK灯亮度为最大值255
+   - 支持root和非root两种权限设置方式
+   - 增强日志记录，显示WORK灯状态设置结果
+
+3. 解决的核心问题
+   - WORK灯开机自动进入闪烁模式的问题
+   - 应用启动后WORK灯自动切换为常亮模式
+   - 确保权限设置和LED状态设置的完整性
+
+文件修改列表:
+============
+
+- app/src/main/java/com/example/myapplication3/MainActivity.java
+  - 修改setLedFilePermissions方法：添加WORK灯常亮模式设置
+  - 修改tryNonRootPermissionSetting方法：添加非root方式LED状态设置
+  - 更新方法注释和日志信息
+
+具体修改内容:
+============
+
+1. setLedFilePermissions方法修改：
+   - 添加命令：echo default-on > /sys/class/leds/work/trigger
+   - 添加命令：echo 255 > /sys/class/leds/work/brightness
+   - 更新日志信息为"LED文件权限设置成功，WORK灯已设为常亮模式"
+
+2. tryNonRootPermissionSetting方法修改：
+   - 在权限设置成功后，尝试设置WORK灯为常亮模式
+   - 添加相应的异常处理和日志记录
+
+应用状态:
+========
+- 编译状态: 成功
+- 运行状态: 正常
+- 功能状态: WORK灯在应用启动时自动进入常亮模式
+
+验证结果:
+========
+1. WORK灯触发模式: [default-on] (常亮模式)
+2. WORK灯亮度: 255 (最大亮度)
+3. 日志确认: "LED文件权限设置成功，WORK灯已设为常亮模式"
+
+备注:
+====
+此版本解决了WORK灯开机自动闪烁的问题，确保应用启动时WORK灯自动进入常亮模式。
+功能已通过重启测试验证，支持自动权限恢复和LED状态设置。

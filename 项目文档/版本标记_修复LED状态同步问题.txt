@@ -1,0 +1,50 @@
+版本标记：修复LED状态同步问题 - 应用启动与ADB控制一致性
+提交ID：
+日期：2025-11-27
+
+=== 功能总结 ===
+
+✅ 已修复的问题：
+
+1. ADB控制后模式不保持问题
+   - 问题：通过ADB关闭并再次打开work灯时，LED不会保持应用中选择的模式，而是自动设置成常亮
+   - 解决方案：在updateUIFromHardwareState方法中添加状态变化检测，当LED从关闭变为开启时，重新应用用户最后选择的模式
+
+2. 应用启动时自动关闭LED问题
+   - 问题：退出app时work灯处于开启状态，重新启动app它会自动关闭work灯
+   - 解决方案：
+     - 添加isAppStarting标志，避免应用启动时误判LED状态变化
+     - 在硬件服务绑定成功后立即同步硬件状态到UI
+     - 确保UI状态与硬件状态在应用启动时保持一致
+
+=== 技术实现 ===
+
+主要代码修改：
+- MainActivity.java：
+  - 添加isAppStarting布尔标志，用于避免应用启动时误判LED状态变化
+  - 修改updateUIFromHardwareState方法，只有在应用不是刚启动且LED确实从关闭变为开启时，才重新应用用户最后选择的模式
+  - 在硬件服务绑定成功后立即调用syncHardwareState方法，确保UI状态与硬件状态一致
+  - 优化状态同步时机，避免初始状态不一致导致的误操作
+
+=== 使用说明 ===
+
+应用控制：
+- 直接在应用中点击模式卡片切换LED模式，点击开关控制LED开关
+- 支持多种模式（常亮、呼吸灯、闪烁）的正确切换和保持
+
+ADB控制：
+- 切换模式：adb shell "echo 'heartbeat' > /sys/class/leds/work/trigger"（呼吸灯模式）
+- 开关控制：adb shell "echo 255 > /sys/class/leds/work/brightness"（开启）或 adb shell "echo 0 > /sys/class/leds/work/brightness"（关闭）
+- 状态查询：adb shell "cat /sys/class/leds/work/trigger"（查看模式）或 adb shell "cat /sys/class/leds/work/brightness"（查看亮度）
+
+=== 版本历史 ===
+
+429c072 - 完整实现LED控制系统双控制模式
+03e8b18 - 修复模式记忆功能：UI初始化问题
+dad8465 - 修复LED模式管理功能：解决UI显示异常、模式恢复和外部变化同步问题
+c1bd98c - 修复JNI注册错误 - HardwareReader类native方法注册索引修复
+a1c8ad1 - feat: 实现WORK灯常亮模式功能
+
+=== 备注 ===
+
+修复后的应用将保持LED状态的一致性和稳定性，无论是通过应用内操作还是ADB命令控制，LED都会保持正确的模式和状态。

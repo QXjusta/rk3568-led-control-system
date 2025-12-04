@@ -1,0 +1,168 @@
+# LED控制系统 - 驱动开发需求文档
+
+## 1. 项目概述
+
+本项目是基于RK3588开发板的LED控制系统，支持Android应用和ADB命令双控制模式，实现对Work灯的开关、亮度调节和模式切换功能。
+
+## 2. 应用功能
+
+### 2.1 应用控制功能
+- **模式切换**：支持常亮模式、呼吸灯模式、闪烁模式
+- **开关控制**：一键开启/关闭LED灯
+- **亮度调节**：在常亮模式(work灯开启状态下)下可调节亮度（0-255）(app当work灯处于开启模式的时候最低亮度调节为0会自动设置成1防止灯熄灭造成work灯被同步机制识别为关闭状态)
+- **状态同步**：UI显示与硬件状态实时同步(持续检测检测到变化后刷新)
+- **智能亮度管理**：呼吸灯/闪烁模式下自动锁定亮度(只是在前端界面上锁定,实际上还是会一直0和255来回跳)
+- **启动状态读取**：应用启动时自动读取并恢复上次退出时记录的 Work 灯开关状态、亮度值及模式，确保用户重启后无需重复设置。
+- **关闭状态记录**：应用正常退出（包括主动关闭、系统回收、异常崩溃）时，立即将当前 Work 灯的开关状态、亮度值及模式写入本地持久化存储（SharedPreferences 或文件），下次启动时优先加载；若驱动层状态被外部 ADB 命令修改，应用下次激活时检测到差异后自动同步并更新本地记录。
+
+### 2.2 ADB命令控制功能
+- **模式切换命令**：
+  - 呼吸灯模式：`adb shell "echo 'heartbeat' > /sys/class/leds/work/trigger"`
+  - 常亮模式：`adb shell "echo 'default-on' > /sys/class/leds/work/trigger"`
+- **开关控制命令**：
+  - 开启LED：`adb shell "echo 255 > /sys/class/leds/work/brightness"`
+  - 关闭LED：`adb shell "echo 0 > /sys/class/leds/work/brightness"`
+- **状态查询命令**：
+  - 查看模式：`adb shell "cat /sys/class/leds/work/trigger"`
+  - 查看亮度：`adb shell "cat /sys/class/leds/work/brightness"`
+
+## 3. 技术实现
+
+### 3.1 应用架构
+- **开发语言**：Java + C++
+- **开发框架**：Android Studio
+- **跨进程通信**：
+  - 机制：使用Android系统隐式AIDL机制，无需显式编写AIDL文件
+  - 实现：系统自动为本地Binder生成AIDL相关代码，处理跨进程通信
+  - 进程配置：
+    - MainActivity：运行在默认进程
+    - HardwareTestActivity：运行在独立进程（:test）
+    - RK3588HardwareService：标记为exported=true，允许跨进程访问
+- **硬件通信**：
+  - 应用层：Java代码通过JNI调用原生方法
+  - 原生层：C++代码优先尝试访问字符设备节点 `/dev/zhangsan_led`，只有在不可访问时才回退到sysfs方式
+  - 驱动层：
+    - 优先：使用自定义字符设备驱动（待开发）
+    - 回退：使用Linux内核自带的LED驱动框架，通过sysfs接口提供访问
+- **状态监控**：定期检测硬件状态，保持UI与硬件同步
+- **数据传输**：LEDState类实现Parcelable接口，支持跨进程传输
+
+### 3.2 硬件访问方式
+应用采用双层访问机制，优先使用字符设备节点，只有在不可访问时才回退到sysfs方式：
+
+#### 1. 优先：字符设备节点方式
+- **设备节点路径**：`/dev/zhangsan_led`
+- **访问方式**：通过open()、ioctl()等系统调用访问
+- **控制命令**：
+  - LED_SET_POWER：设置LED电源状态
+  - LED_SET_BRIGHTNESS：设置LED亮度
+  - LED_GET_STATE：获取LED状态
+
+#### 2. 回退：sysfs文件系统方式
+应用通过sysfs文件系统访问LED设备，主要使用以下设备节点：
+- `/sys/class/leds/work/trigger`：用于切换LED模式
+- `/sys/class/leds/work/brightness`：用于调节LED亮度
+- `/sys/class/leds/work/max_brightness`：用于获取最大亮度值
+
+## 4. 驱动开发需求
+
+### 4.1 硬件相关信息
+- **开发板型号**：RK3568开发板
+- **LED名称**：Work灯
+- **LED类型**：单色LED
+
+### 4.2 设备节点需求
+驱动需要创建以下设备节点：
+- **设备节点路径**：`/sys/class/leds/work/`
+- **子节点**：
+  - `trigger`：用于切换LED模式
+  - `brightness`：用于调节LED亮度（0-255）
+  - `max_brightness`：返回最大亮度值（固定为255）
+
+### 4.3 支持的模式
+驱动需要支持以下LED模式：
+- **常亮模式**（default-on）：LED持续亮着
+- **呼吸灯模式**（heartbeat）：LED以呼吸节奏亮灭
+- **闪烁模式**（timer）：LED以固定频率闪烁
+
+### 4.4 权限设置
+- **设备节点权限**：
+  - 所有者：root
+  - 组：root
+  - 权限：rw-rw-rw-（或根据实际安全需求调整）
+
+### 4.5 驱动实现要求
+1. 驱动需要符合Linux内核驱动规范
+2. 支持sysfs接口，与标准LED驱动框架兼容
+3. 确保设备节点在系统启动时自动创建
+4. 支持热插拔（如果需要）
+
+## 5. 测试方法
+
+### 5.1 基本功能测试
+1. **检查设备节点**：
+   ```bash
+   adb shell ls -la /sys/class/leds/work/
+   ```
+
+2. **开启LED**：
+   ```bash
+   adb shell echo 255 > /sys/class/leds/work/brightness
+   ```
+
+3. **关闭LED**：
+   ```bash
+   adb shell echo 0 > /sys/class/leds/work/brightness
+   ```
+
+4. **切换到呼吸灯模式**：
+   ```bash
+   adb shell echo 'heartbeat' > /sys/class/leds/work/trigger
+   ```
+
+5. **查看当前模式**：
+   ```bash
+   adb shell cat /sys/class/leds/work/trigger
+   ```
+
+6. **查看当前亮度**：
+   ```bash
+   adb shell cat /sys/class/leds/work/brightness
+   ```
+
+### 5.2 应用功能测试
+1. 安装Android应用：
+   ```bash
+   adb install app-debug.apk
+   ```
+
+2. 运行应用，测试以下功能：
+   - 开关控制
+   - 模式切换
+   - 亮度调节
+   - 状态同步
+
+## 6. 联系方式
+
+如有任何问题或需要进一步的信息，请联系：
+- 应用开发人员：[您的姓名/团队名称]
+- 联系邮箱：[您的邮箱地址]
+- 联系电话：[您的电话号码]
+
+## 7. 附件
+
+- Android应用源码
+- 应用APK文件
+- 版本标记文档
+- 跨进程通信架构优化文档
+
+---
+
+**文档创建日期**：2025-11-27
+**文档版本**：1.1
+**最后更新**：2025-11-27
+**更新说明**：
+- 添加跨进程通信架构说明
+- 更新应用架构描述，反映隐式AIDL机制的使用
+- 添加LEDState类设计说明
+- 记录项目最新状态和架构优化
