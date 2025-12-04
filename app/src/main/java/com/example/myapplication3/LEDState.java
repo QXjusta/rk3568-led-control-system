@@ -14,11 +14,19 @@ public class LEDState implements Parcelable {
     public int mmc2Brightness = 0;
     public boolean workFound = false;
     public boolean mmc2Found = false;
-    
+
+    /**
+            * 无参构造函数
+     * 注意：添加super()是为了解决Trae AI/VS Code插件的语法检查误报
+     * 在Java中，编译器会自动插入对父类无参构造函数的调用
+     * 此调用在运行时是多余的，但可以解决语法检查器的误报问题
+     */
     public LEDState() {
+        super();
     }
     
     protected LEDState(Parcel in) {
+        super();
         powerOn = in.readByte() != 0;
         brightness = in.readInt();
         mode = in.readString();

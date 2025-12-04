@@ -422,7 +422,7 @@ public class MainActivity extends AppCompatActivity {
         // 移除用户操作检测逻辑，始终进行状态同步
         if (hardwareService != null) {
             // 直接获取LED状态，不依赖网络连接状态
-            LEDState state = hardwareService.getLEDState();
+            LEDState state = hardwareService.getLEDState    ();
             if (state != null) {
                 updateUIFromHardwareState(state);
             }

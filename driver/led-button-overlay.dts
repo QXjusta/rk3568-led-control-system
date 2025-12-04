@@ -3,7 +3,7 @@
 /plugin/;
 
 / {
-    compatible = "rockchip,rk3588";
+    compatible = "rockchip,rk3568";
     fragment@0 {
         target-path = "/";
         __overlay__ {
