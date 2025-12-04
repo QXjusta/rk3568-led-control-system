@@ -4,7 +4,7 @@ import android.os.Parcel;
 import android.os.Parcelable;
 
 /**
- * LED状态类，实现Parcelable接口用于跨进程传
+ * LED状态类，实现Parcelable接口用于跨进程传递
  */
 public class LEDState implements Parcelable {
     public boolean powerOn = false;
@@ -16,15 +16,19 @@ public class LEDState implements Parcelable {
     public boolean mmc2Found = false;
 
     /**
-            * 无参构造函数
-     * 注意：添加super()是为了解决Trae AI/VS Code插件的语法检查误报
-     * 在Java中，编译器会自动插入对父类无参构造函数的调用
-     * 此调用在运行时是多余的，但可以解决语法检查器的误报问题
+     * 无参构造函数
+     * 注意：添加super()调用是为了修复VS Code/Trae AI语法检查器的误报问题
+     * 实际Java编译器会自动隐式调用父类Object的无参构造函数
+     * 显式添加此调用仅用于解决IDE/插件的错误报错，不影响运行时逻辑
      */
     public LEDState() {
         super();
     }
     
+    /**
+     * 从Parcel对象恢复LEDState实例的构造函数
+     * 同样显式添加super()调用以修复VS Code/Trae AI语法检查器的误报
+     */
     protected LEDState(Parcel in) {
         super();
         powerOn = in.readByte() != 0;
