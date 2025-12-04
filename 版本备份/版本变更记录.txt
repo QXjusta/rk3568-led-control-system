@@ -270,11 +270,38 @@
    - 两个Activity在不同进程
    - 本地Binder设计支持跨进程访问
 
+LED状态读取修复:
+----------------
+1. 问题描述
+   - 在电源状态为关闭的情况下，硬件LED状态无法正确读取用户最后一次选择的状态
+   - HardwareTestActivity中formatLEDState方法的条件判断逻辑过于复杂
+
+2. 修复内容
+   - 简化HardwareTestActivity中formatLEDState方法的条件判断逻辑
+   - 将原条件`"unknown".equals(state.mode) || (!state.powerOn && !state.mode.equals("设备未找到"))`简化为`!state.powerOn`
+   - 确保LED关闭时始终读取SharedPreferences中的lastUserSelectedMode
+
+3. 跨进程通信实现优化
+   - 在RK3588HardwareService的HardwareBinder类中添加onTransact方法
+   - 支持四个操作事务处理：getLEDState、readSystemInfo、checkDevicePermissions、controlWorkLED
+   - 在HardwareTestActivity中实现跨进程通信代理
+
+4. LEDState相关编译错误修复
+   - 移除不存在的LEDState.fromString方法调用
+   - 添加parseLEDStateFromString方法实现字符串解析
+   - 修复LEDState构造方法参数不匹配问题
+   - 移除color字段处理
+
 修改文件:
 --------
 - 删除了显式AIDL文件：
   - app/src/main/aidl/com/example/myapplication3/IRK3588HardwareService.aidl
   - app/src/main/aidl/com/example/myapplication3/LEDState.aidl
+- 优化了HardwareTestActivity.java：
+  - 简化formatLEDState方法的条件判断逻辑
+  - 确保LED关闭时正确读取用户最后选择的模式
+- 完善了RK3588HardwareService.java：
+  - 添加onTransact方法支持跨进程通信
 
 验证结果:
 --------
@@ -282,15 +309,17 @@
 - ✅ 安装成功：已安装到设备rk3568_r - 11
 - ✅ 跨进程通信正常：两个Activity在不同进程中均可与服务通信
 - ✅ LEDState类独立设计有效：跨进程传输正常
+- ✅ LED状态读取修复：在LED关闭时正确显示用户选择的模式
 
 当前版本状态:
 ============
 - 版本号: 8
-- 版本名称: 跨进程通信架构优化
+- 版本名称: 跨进程通信架构优化与LED状态读取修复
 - 编译状态: 成功
 - 运行状态: 正常
 - 功能状态: 完整
 - 跨进程通信: 正常
+- LED状态读取: 已修复
 
 备份文件 (按创建时间排序):
 ========================
