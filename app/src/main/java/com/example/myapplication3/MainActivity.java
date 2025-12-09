@@ -610,6 +610,9 @@ public class MainActivity extends AppCompatActivity {
                         });
                     }
                 }
+                
+                // 更新亮度条启用状态 - 确保应用启动时常亮模式下亮度条可用
+                updateBrightnessSeekBarEnabledState();
             }
         });
     }
