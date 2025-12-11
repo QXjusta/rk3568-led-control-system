@@ -18,7 +18,7 @@ extern "C" {
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 // 设备节点路径 - 根据实训要求，使用组长名字命名
-#define LED_DEVICE_NODE "/dev/zhangsan_led"
+#define LED_DEVICE_NODE "/dev/yuanzi_led"
 // GPIO设备节点定义 - RK3588使用sysfs方式访问GPIO，不需要直接打开设备节点
 #define GPIO_SYSFS_PATH "/sys/class/gpio/"
 #define SERIAL_DEVICE_NODE "/dev/ttyS4"
@@ -26,7 +26,8 @@ extern "C" {
 // LED控制命令
 #define LED_SET_POWER _IOW('L', 1, int)
 #define LED_SET_BRIGHTNESS _IOW('L', 2, int)
-#define LED_GET_STATE _IOR('L', 3, struct led_state)
+#define LED_SET_MODE _IOW('L', 3, char[32])
+#define LED_GET_STATE _IOR('L', 4, struct led_state)
 
 // LED状态结构体
 struct led_state {
@@ -1057,7 +1058,14 @@ Java_com_example_myapplication3_RK3588HardwareService_setWorkLEDMode(JNIEnv *env
             power = 1;
         }
         
+        // 先设置电源状态
         int ret = ioctl(led_fd, LED_SET_POWER, &power);
+        
+        // 然后设置工作模式
+        if (ret >= 0 && power) {
+            ret = ioctl(led_fd, LED_SET_MODE, mode_str);
+        }
+        
         close(led_fd);
         
         if (ret >= 0) {

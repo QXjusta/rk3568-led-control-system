@@ -47,7 +47,7 @@ public class RK3588HardwareService extends Service {
     private static final int DEFAULT_BAUD_RATE = 115200;
     
     // LED设备节点配置 - 根据实训要求，使用组长名字命名
-    private static final String LED_DEVICE_NODE = "/dev/zhangsan_led"; // 替换为实际组长名字
+    private static final String LED_DEVICE_NODE = "/dev/yuanzi_led"; // 替换为实际组长名字
     
     // 通信状态
     private AtomicBoolean isConnected = new AtomicBoolean(false);
@@ -98,7 +98,7 @@ public class RK3588HardwareService extends Service {
                         return true;
                         
                     case 3: // checkDevicePermissions
-                        boolean hasPermissions = checkDevicePermissions("/dev/zhangsan_led");
+                        boolean hasPermissions = checkDevicePermissions("/dev/yuanzi_led");
                         reply.writeInt(1); // 成功标志
                         reply.writeInt(hasPermissions ? 1 : 0);
                         return true;
